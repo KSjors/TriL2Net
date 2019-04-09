@@ -245,6 +245,7 @@ class RootedLevelKNetwork:
 
         number_of_generator_nodes = self._to_block_form()
 
+        # TODO: make a class function
         generator = self.get_generator_sub_network()
         transformations = generator.to_standard_form_gen_2()
 
@@ -760,7 +761,7 @@ class RootedLevelKNetwork:
 
         # Find edges in network
         cut_arc_matrix = np.zeros_like(self.adj_matrix)
-        edges = list(self.get_edges())
+        edges = self.get_edges()
 
         # Loop through all edges
         for from_node_name, to_node_name in edges:
@@ -848,7 +849,7 @@ class RootedLevelKNetwork:
         generator_nodes_leaves = self.get_leaf_children(set(generator_nodes), 1)
         return RootedLevelKNetwork.from_network(self, generator_nodes_leaves)
 
-    def get_edges(self, leafless: bool = False) -> zip:
+    def get_edges(self, leafless: bool = False) -> list:
         """Retrieve all the edges (from_node, to_node) in the network."""
         logging.debug("Retrieving all the {}edges in the network.".format("leafless " if leafless else ""))
         check_size = self.number_of_internals if leafless else self.number_of_nodes
@@ -859,7 +860,7 @@ class RootedLevelKNetwork:
             from_nodes += list(self._get_node_names(extra_from_nodes))
             to_nodes += list(self._get_node_names(extra_to_nodes))
             i += 1
-        return zip(np.array(from_nodes), np.array(to_nodes))
+        return [[from_node, to_node] for from_node, to_node in zip(np.array(from_nodes), np.array(to_nodes))]
 
     def prune(self, suppress_redundant: str = 'all', suppress_parallel: bool = True):
         """Suppress al unnecessary/redundant/parallel nodes/edges in network."""

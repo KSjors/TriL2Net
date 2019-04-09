@@ -5,6 +5,7 @@ import random
 import socket
 import hashlib
 import logging
+from bidict import bidict
 logging.basicConfig(level=logging.DEBUG)
 
 def list_to_name(lst, name_list):
@@ -32,27 +33,28 @@ def leaf_name_iterator(min_len, max_len):
     return alphabet_iterator
 
 
-def trinets_of_generator(generator):
-    edges = generator.get_edges(leafless=True)
-    number_of_generator_leaves = generator.number_of_leaves
+def is_symmetry(symmetrical_nodes, symmetry_check_list, list_of_lists):
+    """Check if one of list of lists isomorphisms (def by symmetrical nodes) is in symmetry_check_list"""
+    logging.debug("Checking if {} is a symmetry of one of {} through {}.".format(list_of_lists, symmetry_check_list, symmetrical_nodes))
+    number_of_symmetries = len(symmetrical_nodes)
+    symmetry_iterator = all_combinations(list(symmetrical_nodes), 1, number_of_symmetries)
+    for symmetries in symmetry_iterator:
+        current_symmetry_bidict = bidict()
+        for node in symmetries:
+            current_symmetry_bidict.put(node, symmetrical_nodes[node])
+            current_symmetry_bidict.put(symmetrical_nodes[node], node)
+        a = substitute(current_symmetry_bidict, list_of_lists)
+        print('----', a, symmetry_check_list)
+        if a in symmetry_check_list:
+            return True
+    return False
 
-    extra_leaves_iterator = itertools.combinations(edges, 3 - number_of_generator_leaves)
-    trinets_gen_sides = []
-    for extra_leaves in extra_leaves_iterator:
-        current_trinet = copy.deepcopy(generator)
-        for extra_leaf in extra_leaves:
-            current_trinet.add_leaf_to_edge(extra_leaf[0], extra_leaf[1])
-        trinets_gen_sides.append([current_trinet, generator, extra_leaves])
 
-    if number_of_generator_leaves == 1:
-        extra_leaves_iterator = itertools.combinations(edges, 1)
-        for extra_leaves in extra_leaves_iterator:
-            current_trinet = copy.deepcopy(generator)
-            new_node_name, _ = current_trinet.add_leaf_to_edge(extra_leaves[0][0], extra_leaves[0][1])
-            current_trinet.add_leaf_to_edge(new_node_name, extra_leaves[0][1])
-            trinets_gen_sides.append([current_trinet, generator, (extra_leaves[0], copy.deepcopy(extra_leaves[0]))])
+def substitute(symmetries: bidict, list_of_lists):
+    result = [[symmetries.get(i, i) for i in lst] for lst in list_of_lists]
+    result.sort()
+    return result
 
-    return trinets_gen_sides
 
 
 def guid():

@@ -37,14 +37,13 @@ def is_symmetry(symmetrical_nodes, symmetry_check_list, list_of_lists):
     """Check if one of list of lists isomorphisms (def by symmetrical nodes) is in symmetry_check_list"""
     logging.debug("Checking if {} is a symmetry of one of {} through {}.".format(list_of_lists, symmetry_check_list, symmetrical_nodes))
     number_of_symmetries = len(symmetrical_nodes)
-    symmetry_iterator = all_combinations(list(symmetrical_nodes), 1, number_of_symmetries)
+    symmetry_iterator = all_combinations(list(symmetrical_nodes), 1, number_of_symmetries+1)
     for symmetries in symmetry_iterator:
         current_symmetry_bidict = bidict()
         for node in symmetries:
             current_symmetry_bidict.put(node, symmetrical_nodes[node])
             current_symmetry_bidict.put(symmetrical_nodes[node], node)
         a = substitute(current_symmetry_bidict, list_of_lists)
-        print('----', a, symmetry_check_list)
         if a in symmetry_check_list:
             return True
     return False

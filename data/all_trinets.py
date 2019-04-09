@@ -1,18 +1,15 @@
 import data.generators as generators
-from utils.help_functions import trinets_of_generator
 from datastructures.rooted_level_k_network import *
 import pickle
-import os
 
 
-def regenerate_trinets():
-    all_generators_dir_adj_matrix = [generators.A, generators.B, generators.C, generators.D, generators.cactus, generators.cherry]
+def regenerate_trinets() -> None:
+    """Regenerate and save all possible trinets."""
+    logging.debug("Regenerating all possible trinets and saving them.")
+    all_generators = [generators.generator_level0, generators.generator_level1, generators.generator_A, generators.generator_B, generators.generator_C, generators.generator_D]
     all_trinets_gen_sides = []
-    all_generators = []
-    for current_generator_dir_adj_matrix in all_generators_dir_adj_matrix:
-        current_generator = RootedLevelKNetwork.from_dir_adj_matrix(current_generator_dir_adj_matrix)
-        all_generators.append(current_generator)
-        all_trinets_gen_sides += trinets_of_generator(current_generator)
+    for generator in all_generators:
+        all_trinets_gen_sides += generator.build_trinets()
 
     pickle_out = open("data/all_trinets_save.pickle", 'wb')
     data = [all_generators, all_trinets_gen_sides]
@@ -20,7 +17,9 @@ def regenerate_trinets():
     pickle_out.close()
 
 
-def get_trinets():
+def get_trinets() -> (list, list, list):
+    """Read and retrieve all possible trinets."""
+    logging.debug("Reading and retrieving all possible trinets.")
     pickle_in = open("data/all_trinets_save.pickle", 'rb')
     result = pickle.load(pickle_in)
     pickle_in.close()

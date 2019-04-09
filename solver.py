@@ -1,18 +1,24 @@
 from datastructures.omega import *
 from datastructures.rooted_level_k_network import *
 from data.all_trinets import *
+from datastructures.trinet_set import TrinetSet
+from utils.help_functions import guid
 import copy
 import time
 
-# all_generators, all_trinets, all_trinets_gen_sides = get_trinets()
+all_generators, all_trinets, all_trinets_gen_sides = get_trinets()
 
 
 class Solver:
-    def __init__(self, trinet_set):
+    def __init__(self, trinet_set: TrinetSet):
+        logging.debug("Creating solver object for trinet set {}.".format(trinet_set.uid))
+        self.uid = guid()
+        logging.debug("Solver has uid {}.".format(self.uid))
         self.trinet_sets = [trinet_set]
         self.transformations = {}
 
     def next_transform(self):
+        logging.debug("Solver {} performing the next transformation.".format(self.uid))
         if len(self.trinet_sets[-1].taxa_names) == 2:
             print("WARNING: No more transformations to do")
             return None
@@ -23,30 +29,35 @@ class Solver:
             if len(mss) >= 2:
                 return self.transform(mss)
 
-    def transform(self, mss):
+    def transform(self, mss: list):
+        logging.debug("Solver {} transforming {}".format(self.uid, mss))
         mss_trinets = dict()
         if len(mss) == 2:
+            # TODO: discard all faulty trinets first
             # Find trinet of which mss is part
             current_taxa = list(self.trinet_sets[-1].taxa_names)
             third_leaf = current_taxa.pop(-1)
             while third_leaf in mss:
                 third_leaf = current_taxa.pop(-1)
             trinet = sorted(mss + [third_leaf])
-            trinet_of_mss = self.trinet_sets[-1].trinets[str(trinet)]
-            mss_network = sub_network_of(trinet_of_mss, mss)
+            trinet_of_mss = self.trinet_sets[-1].trinet_dict[str(trinet)]
+            mss_network = RootedLevelKNetwork.from_network(trinet_of_mss, set(mss))
             mss_network.visualize()
         elif len(mss) == 3:
+            # TODO what if this is the only trinet that disagrees
             trinet = sorted(mss)
-            mss_network = self.trinet_sets[-1].trinets[str(trinet)]
+            mss_network = self.trinet_sets[-1].trinet_dict[str(trinet)]
             mss_network.visualize()
         else:
             trinet_iterator = itertools.combinations(mss, 3)
             for trinet in trinet_iterator:
                 trinet = sorted(trinet)
-                mss_trinets[str(trinet)] = self.trinet_sets[-1].trinets[str(trinet)]
-            get_network(mss, mss_trinets)
+                mss_trinets[str(trinet)] = self.trinet_sets[-1].trinet_dict[str(trinet)]
+            print(get_network(mss, mss_trinets))
 
-        new_trinet_set = copy.deepcopy(self.trinet_sets[-1])
+        # TODO: suppress in @classmethod?
+        # TODO: save network of mss
+        new_trinet_set = TrinetSet.copy_trinet_set(self.trinet_sets[-1])
         new_name = new_trinet_set.suppress_minimal_sink_set(mss)
         self.transformations[new_name] = mss
         self.trinet_sets.append(new_trinet_set)
@@ -65,6 +76,8 @@ def get_network(taxa, trinets):
     generator_count = np.zeros(len(all_generators))
     for trinet_taxa, trinet in trinets.items():
         generator_number = all_trinets.index(trinet)
+        generator_count[generator_number] += 1
+    return generator_count
 
 
 def get_network_structure_old(taxa, trinets):

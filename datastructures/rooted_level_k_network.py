@@ -323,7 +323,7 @@ class RootedLevelKNetwork:
             transformations += self._sort_extra_nodes(number_of_generator_nodes)
         return transformations
 
-    def _rename_node(self, old_name: str, new_name: str):
+    def rename_node(self, old_name: str, new_name: str):
         """Replace name of node with name old_name by new_name."""
         logging.debug("Renaming node {} with name {}.".format(old_name, new_name))
         node_number = self.node_names.pop(old_name)

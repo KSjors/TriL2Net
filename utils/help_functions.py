@@ -8,6 +8,7 @@ import logging
 from bidict import bidict
 logging.basicConfig(level=logging.DEBUG)
 
+
 def list_to_name(lst, name_list):
     return [name_list[x] for x in lst]
 
@@ -53,7 +54,6 @@ def substitute(symmetries: bidict, list_of_lists):
     result = [[symmetries.get(i, i) for i in lst] for lst in list_of_lists]
     result.sort()
     return result
-
 
 
 def guid():

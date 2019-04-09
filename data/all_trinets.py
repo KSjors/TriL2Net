@@ -3,6 +3,19 @@ from datastructures.rooted_level_k_network import *
 import pickle
 
 
+def pickle_save(filename, data):
+    pickle_out = open(filename, 'wb')
+    pickle.dump(data, pickle_out)
+    pickle_out.close()
+
+
+def pickle_read(filename):
+    pickle_in = open(filename, 'rb')
+    result = pickle.load(pickle_in)
+    pickle_in.close()
+    return result
+
+
 def regenerate_trinets() -> None:
     """Regenerate and save all possible trinets."""
     logging.debug("Regenerating all possible trinets and saving them.")

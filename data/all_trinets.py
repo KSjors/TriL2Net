@@ -6,11 +6,11 @@ import os
 
 
 def regenerate_trinets():
-    all_generators_dir_adj_matrix = [generators.A, generators.B, generators.C, generators.D, generators.cactus]
+    all_generators_dir_adj_matrix = [generators.A, generators.B, generators.C, generators.D, generators.cactus, generators.cherry]
     all_trinets_gen_sides = []
     all_generators = []
     for current_generator_dir_adj_matrix in all_generators_dir_adj_matrix:
-        current_generator = network_from_dir_adj_matrix(current_generator_dir_adj_matrix)
+        current_generator = RootedLevelKNetwork.from_dir_adj_matrix(current_generator_dir_adj_matrix)
         all_generators.append(current_generator)
         all_trinets_gen_sides += trinets_of_generator(current_generator)
 

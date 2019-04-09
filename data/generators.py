@@ -6,7 +6,7 @@ Created on Wed Mar 13 14:48:29 2019
 """
 from datastructures.rooted_level_k_network import *
 
-cherry = np.array([[0, 1, 1]])
+cherry = np.array([[0, 1, 1, 0, 0], [0, 0, 0, 1, 1]])
 
 cactus = np.array([[0, 2, 0], [0, 0, 1]])
 

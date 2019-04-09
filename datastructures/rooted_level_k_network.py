@@ -201,14 +201,19 @@ class RootedLevelKNetwork:
         transformations = []
         if not self._is_leaf_node(child_a):
             transformations.append(self.set_node_as_number(child_a, 1))
+            transformations.append(self.set_node_as_number(child_b, 2))
         else:
             transformations.append(self.set_node_as_number(child_b, 1))
-        transformations += self._sort_extra_nodes(1)
+            transformations.append(self.set_node_as_number(child_a, 2))
         return transformations
 
     def _to_standard_form_1(self) -> list:
         """Put adjacency matrix of level-1 trinet in standard form."""
         logging.debug("Putting adjacency matrix of level-1 trinet {} in standard form".format(self.uid))
+
+        if not self.is_biconnected():
+            return []
+
         number_of_generator_nodes = self._to_block_form()
 
         generator = self.get_generator_sub_network()
@@ -235,7 +240,9 @@ class RootedLevelKNetwork:
     def _to_standard_form_2(self) -> list:
         """Put adjacency matrix of level-2 trinet in standard form."""
         logging.debug("Putting adjacency matrix of level-2 trinet {} in standard form".format(self.uid))
-        assert self.is_biconnected(), "Can not put non-biconnected level-2 network in standard form"
+        if not self.is_biconnected():
+            return []
+
         number_of_generator_nodes = self._to_block_form()
 
         generator = self.get_generator_sub_network()
@@ -862,8 +869,6 @@ class RootedLevelKNetwork:
         changes = True
 
         while changes:
-            self.visualize()
-            time.sleep(0.5)
             changes = False
             leaf_numbers = set(self._get_leaf_numbers())
             in_degrees, out_degrees = np.array(self.get_in_degrees()), np.array(self.get_out_degrees())
@@ -956,10 +961,7 @@ class RootedLevelKNetwork:
         """Switch rows and columns corresponding to nodes from place in adjacency matrix"""
         logging.debug("Switch rows and columns corresponding to nodes {} and {} from place in adjacency matrix.".format(node_name_1, node_name_2))
         # Switches node place in matrix
-        # TODO: to assert
-        if self._is_leaf_node(node_name_1) or self._is_leaf_node(node_name_2):
-            print("WARNING: can not switch nodes {} and {} as at least one is a leaf".format(node_name_1, node_name_2))
-            return
+        assert not (self._is_leaf_node(node_name_1) ^ self._is_leaf_node(node_name_2)), "WARNING: can not switch nodes {} and {} as exactly one is a leaf".format(node_name_1, node_name_2)
 
         x = self._get_node_number(node_name_1)
         y = self._get_node_number(node_name_2)

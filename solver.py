@@ -12,12 +12,12 @@ class Solver:
     def __init__(self, trinet_set: TrinetSet):
         logging.debug("Creating solver object for trinet set {}.".format(trinet_set.uid))
         self.uid = guid()
-        logging.debug("Solver has uid {}.".format(self.uid))
+        self.logger = logging.getLogger("solver.{}".format(self.uid))
         self.trinet_sets = [trinet_set]
         self.transformations = {}
 
     def next_transform(self):
-        logging.debug("Solver {} performing the next transformation.".format(self.uid))
+        self.logger.debug("Performing the next transformation.")
         if len(self.trinet_sets[-1].taxa_names) == 2:
             print("WARNING: No more transformations to do")
             return None
@@ -29,7 +29,7 @@ class Solver:
                 return self.transform(mss)
 
     def transform(self, mss: list):
-        logging.debug("Solver {} transforming {}".format(self.uid, mss))
+        self.logger.debug("Transforming {}".format(mss))
         mss_trinets = dict()
         if len(mss) == 2:
             # TODO: discard all faulty trinets first

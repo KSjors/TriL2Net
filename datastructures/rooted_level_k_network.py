@@ -1050,4 +1050,12 @@ class RootedLevelKNetwork:
     def __str__(self):
         return str(self.node_names) + str("\n") + str(self.adj_matrix)
 
+    def __getstate__(self):
+        self.logger = 'network.{}'.format(self.uid)
+        return self.__dict__
+
+    def __setstate__(self, d):
+        self.__dict__ = d
+        self.logger = logging.getLogger(self.logger)
+        return self.__dict__
 

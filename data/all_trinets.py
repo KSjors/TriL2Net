@@ -1,6 +1,7 @@
 import data.generators as generators
 from datastructures.rooted_level_k_network import *
 import pickle
+import dill
 
 
 def pickle_save(filename, data):
@@ -13,6 +14,19 @@ def pickle_read(filename):
     pickle_in = open(filename, 'rb')
     result = pickle.load(pickle_in)
     pickle_in.close()
+    return result
+
+
+def dill_save(filename, data):
+    dill_out = open(filename, 'wb')
+    dill.dump(data, dill_out)
+    dill_out.close()
+
+
+def dill_read(filename):
+    dill_in = open(filename, 'rb')
+    result = dill.load(dill_in)
+    dill_in.close()
     return result
 
 

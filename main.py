@@ -24,15 +24,26 @@ import data.generators as generator
 from data.all_trinets import *
 from utils.help_functions import *
 
+os.environ["PATH"] += os.pathsep + 'C:/Program Files (x86)/Graphviz2.38/bin/'
+filename_save_trinets_B = 'data/trinets_B'
+
 # regenerate_trinets()
 # all_generators, all_trinets, all_trinets_gen_sides = get_trinets()
 
 dct = test_networks.B
 network = RootedLevelKNetwork.from_connections_dict(dct)
-# trinets = network.get_exhibited_trinets()
-# pickle_save(filename_save_trinets_B, trinets)
-# trinets = pickle_read(filename_save_trinets_B)
-# trinet_set = TrinetSet.from_triplet_trinet_list(trinets)
-# solver = Solver(trinet_set)
-# solver.state()
+network.visualize()
+time.sleep(0.2)
+# pickle_save("data/network_B.pickle", network)
+# network = pickle_read("data/network_B.pickle")
+# network.visualize()
 
+# trinets = network.get_exhibited_trinets()
+
+# trinets[0][1].visualize()
+#
+# pickle_save('data/trinets_B', trinets)
+trinets = pickle_read(filename_save_trinets_B)
+
+tn = trinets[0][1]
+tn.visualize()

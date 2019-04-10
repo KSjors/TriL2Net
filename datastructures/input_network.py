@@ -6,7 +6,6 @@ import itertools
 import numpy as np
 from tqdm import tqdm
 
-logging.basicConfig(level=logging.DEBUG)
 
 
 class InputRootedNetwork(RootedLevelKNetwork):

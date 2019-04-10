@@ -3,17 +3,24 @@ import numpy as np
 import itertools
 from utils.help_functions import is_symmetry
 from bidict import bidict
+import logging
 import copy
 
 
 class RootedLevelKGenerator(RootedLevelKNetwork):
     def __init__(self, dir_adj_matrix: np.ndarray, necessary_edges: list, symmetrical_nodes: bidict, level: int = 2, dimension: int = 2):
+        logging.debug("Creating generator network.")
         network = RootedLevelKNetwork.from_dir_adj_matrix(dir_adj_matrix=dir_adj_matrix, level=level, dimension=dimension)
+        network.logger.debug("Created for generator network creation.")
         super().__init__(network.adj_matrix, network.node_names, network.leaf_names, network.level, network.dimension)
+        self.logger = logging.getLogger('network.gen.{}'.format(self.uid))
+        self.logger.debug("Created through network {}.".format(network.uid))
         self.necessary_edges = necessary_edges
         self.symmetrical_nodes = symmetrical_nodes
 
     def build_trinets(self):
+        """Build all possible trinets."""
+        self.logger.debug("Building all possible trinets.")
         base_net = RootedLevelKNetwork.copy_network(self)
 
         # Add edges to generator which are necessary (in case of parallel arcs)

@@ -5,6 +5,7 @@ Created on Tue Feb 26 14:11:45 2019
 @author: Sjors
 """
 
+import logging
 from utils.help_functions import guid
 from datastructures.rooted_level_k_network import *
 import itertools

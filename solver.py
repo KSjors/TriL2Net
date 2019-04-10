@@ -1,3 +1,4 @@
+import logging
 from datastructures.omega import *
 from datastructures.rooted_level_k_network import *
 from data.all_trinets import *
@@ -5,8 +6,6 @@ from datastructures.trinet_set import TrinetSet
 from utils.help_functions import guid
 import copy
 import time
-
-all_generators, all_trinets, all_trinets_gen_sides = get_trinets()
 
 
 class Solver:

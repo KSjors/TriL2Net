@@ -6,6 +6,7 @@ from utils.help_functions import *
 
 class Omega:
     def __init__(self, trinet_set):
+
         self.adj_matrix = np.zeros((trinet_set.number_of_taxa,  trinet_set.number_of_taxa))
         self.taxa_names = trinet_set.taxa_names
         cut_arc_sets_per_triplet = trinet_set.cut_arc_sets_per_triplet()
@@ -28,7 +29,7 @@ class Omega:
         adj_dict = {}
         for x in range(len(self.adj_matrix)):
             ys = set(np.where(self.adj_matrix[x] <= level)[0])
-            ys -= set([x])
+            ys -= {x}
             adj_dict[x] = ys
 
         tj = tarjan(adj_dict)

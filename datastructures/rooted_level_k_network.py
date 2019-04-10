@@ -1008,7 +1008,7 @@ class RootedLevelKNetwork:
         for triplet in tqdm(triplets):
             current_trinet = RootedLevelKNetwork.trinet_from_network(self, set(triplet))
             current_trinet.to_standard_form()
-            trinets.append((triplet, current_trinet))
+            trinets.append(current_trinet)
         return trinets
 
     def visualize(self):

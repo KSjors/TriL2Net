@@ -13,43 +13,67 @@ import itertools
 
 class TrinetSet:
     def __init__(self, trinet_dict: dict, taxa_names: bidict):
-        logging.debug("Creating a trinet set.")
-        self.trinet_dict = trinet_dict
         self.uid = guid()
-        logging.debug("Trinet set has uid {}.".format(self.uid))
+        self.logger = logging.getLogger("trinet_set.{}".format(self.uid))
+        self.trinet_dict = trinet_dict
         self.taxa_names = taxa_names
         self.number_of_taxa = len(taxa_names)
 
     @classmethod
     def copy_trinet_set(cls, trinet_set):
+        logging.debug("Copying trinet_set {}.".format(trinet_set.uid))
+        trinet_set.logger.debug("Being copied.")
         trinet_dict = copy.deepcopy(trinet_set.trinet_dict)
         taxa_names = copy.deepcopy(trinet_set.taxa_names)
-        return cls(trinet_dict, taxa_names)
+        trinet_set_copy = cls(trinet_dict, taxa_names)
+        trinet_set_copy.logger.debug("Copy from {}.".format(trinet_set.uid))
+        return trinet_set_copy
 
     @classmethod
-    def from_triplet_trinet_list(cls, triplet_trinet_list):
+    def from_trinet_list(cls, trinet_list: list):
+        logging.debug("Creating trinet set from triplet trinet list.")
         trinet_dict = {}
         taxa_names = bidict()
-        number_of_taxa = 0
-        for triplet_trinet in triplet_trinet_list:
-            triplet = list(triplet_trinet[0])
-            triplet.sort()
-            for X in triplet:
-                if X not in taxa_names.keys():
-                    taxa_names[X] = number_of_taxa
-                    number_of_taxa += 1
-            trinet_dict[str(triplet)] = triplet_trinet[1]
-        return cls(trinet_dict, taxa_names)
+        trinet_set = cls(trinet_dict, taxa_names)
+        for trinet in trinet_list:
+            trinet_set.add_trinet(trinet)
+
+        trinet_set.logger.debug("Created from triplet trinet list.")
+        return trinet_set
+
+    def add_trinet(self, trinet: RootedLevelKNetwork):
+        """Add trinet to dictionary."""
+        triplet = list(trinet.leaf_names)
+        self.logger.debug("Adding trinet {} with leaves {}.".format(trinet.uid, triplet))
+        assert len(triplet) == 3, "Can not add trinet {} to trinet_set {} as it does not have exactly three leaves.".format(trinet.uid, self.uid)
+        triplet.sort()
+        assert str(triplet) not in self.trinet_dict, "Can not add trinet {} to trinet_set {} as it already exists.".format(trinet.uid, self.uid)
+        self.trinet_dict[str(triplet)] = trinet
+        for X in triplet:
+            if X not in self.taxa_names.keys():
+                self.taxa_names[X] = self.number_of_taxa
+                self.number_of_taxa += 1
+
+    def remove_trinet(self, triplet: list):
+        """Remove trinet with taxa = triplet from dictionary."""
+        self.logger.debug("Removing triplet {}.".format(triplet))
+        triplet.sort()
+        assert len(triplet) == 3, "Can not remove {} as it is not a triplet.".format(triplet)
+        trinet = self.trinet_dict[str(triplet)]
+        self.logger.debug("Triplet {} corresponds to trinet {}.".format(triplet, trinet.uid))
+        self.trinet_dict.pop(str(triplet))
 
     def cut_arc_sets_per_triplet(self) -> dict:
-        logging.debug("Calculating cut-arc sets per trinet.")
+        """Calculate cut-arc sets of each trinet."""
+        self.logger.debug("Calculating cut-arc sets per trinet.")
         cut_arc_sets = {}
         for triplet in self.trinet_dict:
             cut_arc_sets[triplet] = self.trinet_dict[triplet].cut_arc_sets()
         return cut_arc_sets
 
     def suppress_minimal_sink_set(self, mss: list) -> str:
-        logging.debug("Suppressing minimal sink set {}.".format(mss))
+        """Suppress minimal sink set."""
+        self.logger.debug("Suppressing minimal sink set {}.".format(mss))
         mss.sort()
         current_taxa_names = copy.deepcopy(list(self.taxa_names))
 
@@ -89,6 +113,8 @@ class TrinetSet:
         return new_name
 
     def remove_leaf_name(self, node_name: str) -> int:
+        """Remove leaf name from taxa_names and lower all numbers of names above by one"""
+        self.logger.debug("Removing leaf name {}.".format(node_name))
         node_number = self.taxa_names.pop(node_name)
         for y in range(node_number + 1, self.number_of_taxa):
             self.taxa_names[self.taxa_names.inverse[y]] -= 1
@@ -96,6 +122,8 @@ class TrinetSet:
         return node_number
 
     def add_leaf_name(self, node_name: str) -> str:
+        """Add leaf name."""
+        self.logger.debug("Adding leaf name {}.".format(node_name))
         new_number = self.number_of_taxa
         self.taxa_names.put(node_name, new_number)
         self.number_of_taxa += 1
@@ -103,3 +131,13 @@ class TrinetSet:
 
     def __str__(self) -> str:
         return str(self.taxa_names)
+
+    def __getstate__(self):
+        self.logger = 'trinet_set.{}'.format(self.uid)
+        return self.__dict__
+
+    def __setstate__(self, d):
+        self.__dict__ = d
+        self.logger = logging.getLogger(self.logger)
+        return self.__dict__
+

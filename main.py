@@ -20,6 +20,7 @@ import os
 import data.test_networks as test_networks
 from datastructures.rooted_level_k_network import *
 from datastructures.trinet_set import *
+from solver import *
 import data.generators as generator
 from data.all_trinets import *
 from utils.help_functions import *
@@ -32,18 +33,16 @@ filename_save_trinets_B = 'data/trinets_B'
 
 dct = test_networks.B
 network = RootedLevelKNetwork.from_connections_dict(dct)
-network.visualize()
-time.sleep(0.2)
+# network.visualize()
+# time.sleep(0.2)
 # pickle_save("data/network_B.pickle", network)
 # network = pickle_read("data/network_B.pickle")
 # network.visualize()
 
 # trinets = network.get_exhibited_trinets()
-
-# trinets[0][1].visualize()
-#
 # pickle_save('data/trinets_B', trinets)
 trinets = pickle_read(filename_save_trinets_B)
 
-tn = trinets[0][1]
-tn.visualize()
+trinet_set = TrinetSet.from_trinet_list(trinets)
+
+solver = Solver(trinet_set)

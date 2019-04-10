@@ -10,9 +10,9 @@ import time
 
 class Solver:
     def __init__(self, trinet_set: TrinetSet):
-        logging.debug("Creating solver object for trinet set {}.".format(trinet_set.uid))
         self.uid = guid()
         self.logger = logging.getLogger("solver.{}".format(self.uid))
+        self.logger.debug("Creating new solver object from trinet set {}.".format(trinet_set.uid))
         self.trinet_sets = [trinet_set]
         self.transformations = {}
 
@@ -69,6 +69,16 @@ class Solver:
 
     def __str__(self):
         return str(self.trinet_sets[-1]) + " " + str(self.transformations[-1])
+
+    def __getstate__(self):
+        self.logger = 'solver.{}'.format(self.uid)
+        return self.__dict__
+
+    def __setstate__(self, d):
+        self.__dict__ = d
+        self.logger = logging.getLogger(self.logger)
+        return self.__dict__
+
 
 
 def get_network(taxa, trinets):
@@ -179,5 +189,7 @@ def get_network_structure_old(taxa, trinets):
     else:
         print("WARNING: at least three leaves needed for two reticulations")
         return None, None
+
+
 
 

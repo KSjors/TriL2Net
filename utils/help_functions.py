@@ -7,6 +7,7 @@ import socket
 import hashlib
 from bidict import bidict
 
+
 def list_to_name(lst, name_list):
     return [name_list[x] for x in lst]
 

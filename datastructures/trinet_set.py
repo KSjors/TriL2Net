@@ -102,6 +102,7 @@ class TrinetSet:
                 trinet.sort()
                 trinet_network = self.trinet_dict.pop(str(trinet))
                 trinet_network.rename_node(leaf, new_name)
+                trinet_network.to_standard_form()
                 new_trinet = list(binet) + [new_name]
                 new_trinet.sort()
                 self.trinet_dict[str(new_trinet)] = trinet_network
@@ -134,7 +135,9 @@ class TrinetSet:
 
     def __getstate__(self):
         self.logger = 'trinet_set.{}'.format(self.uid)
-        return self.__dict__
+        result = copy.deepcopy(self.__dict__)
+        self.logger = logging.getLogger(self.logger)
+        return result
 
     def __setstate__(self, d):
         self.__dict__ = d

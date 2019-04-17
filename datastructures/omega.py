@@ -2,11 +2,14 @@ import numpy as np
 from tarjan import tarjan
 from graphviz import Digraph
 from utils.help_functions import *
+import logging
 
 
 class Omega:
     def __init__(self, trinet_set):
-
+        self.uid = guid()
+        self.logger = logging.getLogger("omega.{}".format(self.uid))
+        self.logger.debug("Creating new omega object from trinet_set {}.".format(trinet_set.uid))
         self.adj_matrix = np.zeros((trinet_set.number_of_taxa,  trinet_set.number_of_taxa))
         self.taxa_names = trinet_set.taxa_names
         cut_arc_sets_per_triplet = trinet_set.cut_arc_sets_per_triplet()
@@ -26,6 +29,7 @@ class Omega:
         self.adj_matrix += np.eye(len(self.taxa_names))*len(self.taxa_names)
 
     def minimal_sink_sets(self, level=0):
+        self.logger.debug("Computing minimal sink sets.")
         adj_dict = {}
         for x in range(len(self.adj_matrix)):
             ys = set(np.where(self.adj_matrix[x] <= level)[0])
@@ -37,16 +41,17 @@ class Omega:
 #        return adj_dict
 
     def visualize(self, level=0):
+        self.logger.debug("Visualizing level {}.".format(level))
         dot = Digraph()
-        for X in self.taxa_names.keys():
-            dot.node(str(X), str(X))
+        for node_name in self.taxa_names.keys():
+            dot.node(str(node_name), str(node_name))
 
         for x in range(len(self.adj_matrix)):
             ys = np.where(self.adj_matrix[x] <= level)[0]
             for y in ys:
                 if y == x:
                     continue
-                X = self.taxa_names.inverse[x]
-                Y = self.taxa_names.inverse[y]
-                dot.edge(X, Y)
+                node_name_from = self.taxa_names.inverse[x]
+                node_name_to = self.taxa_names.inverse[y]
+                dot.edge(node_name_from, node_name_to)
         dot.render(view=True)

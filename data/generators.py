@@ -32,7 +32,7 @@ B_necessary = []
 generator_B = RootedLevelKGenerator(dir_adj_matrix=B, symmetrical_nodes=B_symmetries, necessary_edges=B_necessary)
 
 C = np.array([[0, 1, 1, 0, 0, 0, 0], [0, 0, 0, 1, 1, 0, 0], [0, 0, 0, 1, 1, 0, 0], [0, 0, 0, 0, 0, 1, 0], [0, 0, 0, 0, 0, 0, 1]])
-C_symmetries = bidict({'1': '2', '3': '4'})
+C_symmetries = bidict()
 C_necessary = []
 generator_C = RootedLevelKGenerator(dir_adj_matrix=C, symmetrical_nodes=C_symmetries, necessary_edges=C_necessary)
 

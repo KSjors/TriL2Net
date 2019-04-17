@@ -20,6 +20,8 @@ def regenerate_trinets() -> None:
     """Regenerate and save all possible trinets."""
     logging.debug("Regenerating all possible trinets and saving them.")
     all_generators = [generators.generator_level0, generators.generator_level1, generators.generator_A, generators.generator_B, generators.generator_C, generators.generator_D]
+    # 1, 2, 15, 6, 2, 6
+    # 0 - 1 - 3 - 18 - 24 - 26 - 32
     all_trinets_gen_sides = []
     for generator in all_generators:
         all_trinets_gen_sides += generator.build_trinets()

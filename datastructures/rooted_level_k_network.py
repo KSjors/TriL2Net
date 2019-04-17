@@ -64,7 +64,7 @@ class RootedLevelKNetwork:
         assert len(taxa), "Can not create trinet from network {} using as this {} are more than 3 leaves.".format(network.uid, taxa)
         trinet = RootedLevelKNetwork.from_network(network, taxa, suppress_redundant='strongly', suppress_parallel=True)
         trinet.logger.debug("Trinet of network {} with taxa {}.".format(network.uid, taxa))
-        # trinet.to_standard_form()
+        trinet.to_standard_form()
         return trinet
 
     @classmethod
@@ -161,12 +161,12 @@ class RootedLevelKNetwork:
         total_number_of_reticulations = sum(in_degrees > 1)
         if total_number_of_reticulations <= self.level:
             return True
-        biconnected_components = self.get_biconnected_components()
+        biconnected_components = self.get_biconnected_components(leafless=True)
         for bc in biconnected_components:
             node_numbers_bc = self._get_node_numbers(bc)
             in_sum_bc = in_degrees[node_numbers_bc]
             number_of_reticulations = sum(in_sum_bc > 1)
-            assert number_of_reticulations > self.level, "Network {} is not valid, biconnected component {} has to many reticulations ({} > {}).".format(
+            assert number_of_reticulations <= self.level, "Network {} is not valid, biconnected component {} has to many reticulations ({} > {}).".format(
                 self.uid, bc, number_of_reticulations, self.level)
         return True
 
@@ -175,23 +175,30 @@ class RootedLevelKNetwork:
         self.logger.debug("Putting adjacency matrix in block form.")
         generator_nodes = self.get_generator_nodes()
         count = 0
+        transformations = []
         for node in generator_nodes:
-            self.set_node_as_number(node, count)
+            transformations.append(self.set_node_as_number(node, count))
             count += 1
+        self.logger.debug("Transformations needed to put in block form are {}.".format(transformations))
         return count
 
-    def to_standard_form(self):
+    def to_standard_form(self) -> list:
         self.logger.debug("Putting adjacency matrix in standard form.")
         ints, leaves, rets = self.number_of_internals_leaves_reticulations()
-        assert 0 <= rets <= 2, "Trinet {} has to many reticulations ({}) to put in standard form.".format(self.uid, rets)
         assert leaves == 3, "Trinet {} does not have exactly three leaves --> can not put in standard form.".format(self.uid)
+        if not self.is_biconnected(leafless=True):
+            return []
         self.logger.debug("Number of reticulations is {}.".format(rets))
         if rets == 0:
-            self._to_standard_form_0()
+            transformations = self._to_standard_form_0()
         elif rets == 1:
-            self._to_standard_form_1()
+            transformations = self._to_standard_form_1()
+        elif rets == 2:
+            transformations = self._to_standard_form_2()
         else:
-            self._to_standard_form_2()
+            raise AssertionError
+        self.logger.debug("Transformations needed to put in standard form are {}.".format(transformations))
+        return transformations
 
     def _to_standard_form_0(self) -> list:
         """Put adjacency matrix of level-0 trinet in standard form."""
@@ -208,13 +215,14 @@ class RootedLevelKNetwork:
         else:
             transformations.append(self.set_node_as_number(child_b, 1))
             transformations.append(self.set_node_as_number(child_a, 2))
+        self.logger.debug("Transformations needed to put level-0 in standard form are {}.".format(transformations))
         return transformations
 
     def _to_standard_form_1(self) -> list:
         """Put adjacency matrix of level-1 trinet in standard form."""
         self.logger.debug("Putting adjacency matrix in standard form (assuming level=1).")
 
-        if not self.is_biconnected():
+        if not self.is_biconnected(leafless=True):
             return []
 
         number_of_generator_nodes = self._to_block_form()
@@ -225,6 +233,7 @@ class RootedLevelKNetwork:
             if len(transformation) == 2:
                 self.switch_nodes_in_adj_matrix(transformation[0], transformation[1])
         transformations += self._sort_extra_nodes(number_of_generator_nodes)
+        self.logger.debug("Transformations needed to put level-1 in standard form are {}.".format(transformations))
         return transformations
 
     def to_standard_form_gen_1(self) -> list:
@@ -238,12 +247,13 @@ class RootedLevelKNetwork:
 
         child_a = root_children.pop()
         transformations.append(self.set_node_as_number(child_a, 1))
+        self.logger.debug("Transformations needed to put level-1 generator in standard form are {}.".format(transformations))
         return transformations
 
     def _to_standard_form_2(self) -> list:
         """Put adjacency matrix of level-2 trinet in standard form."""
         self.logger.debug("Putting adjacency matrix in standard form (assuming level=2).")
-        if not self.is_biconnected():
+        if not self.is_biconnected(leafless=True):
             return []
 
         number_of_generator_nodes = self._to_block_form()
@@ -256,6 +266,7 @@ class RootedLevelKNetwork:
             if len(transformation) == 2:
                 self.switch_nodes_in_adj_matrix(transformation[0], transformation[1])
         transformations += self._sort_extra_nodes(number_of_generator_nodes)
+        self.logger.debug("Transformations needed to put level-2 in standard form are {}.".format(transformations))
         return transformations
 
     def to_standard_form_gen_2(self) -> list:
@@ -270,16 +281,17 @@ class RootedLevelKNetwork:
         assert len(root_children) == 2, "Level-2 generator root does not have two children"
         child_a = root_children.pop()
         child_b = root_children.pop()
-        transformations.append(self.set_node_as_number(child_a, 1))
 
         # Find out whose degree is (1, 2)
         if self.get_in_out_degree_node(child_a) == (1, 2):
             child_1 = child_a
             child_2 = child_b
-        else:
+        elif self.get_in_out_degree_node(child_b) == (1, 2):
             child_1 = child_b
             child_2 = child_a
-
+        else:
+            self.visualize()
+            raise AssertionError
         # Set their numbers
         transformations.append(self.set_node_as_number(child_1, 1))
         transformations.append(self.set_node_as_number(child_2, 2))
@@ -288,7 +300,7 @@ class RootedLevelKNetwork:
         children = self.get_children({child_1}, 1).difference({child_1, child_2})
         child_c = children.pop()
         try:
-            child_d = root_children.pop()
+            child_d = children.pop()
             # Find out whose degree is (1, 2)
             if self.get_in_out_degree_node(child_c) == (1, 2):
                 child_3 = child_c
@@ -300,6 +312,7 @@ class RootedLevelKNetwork:
             transformations.append(self.set_node_as_number(child_4, 4))
         except KeyError:
             transformations.append(self.set_node_as_number(child_c, 3))
+        self.logger.debug("Transformations needed to put level-2 generator in standard form are {}.".format(transformations))
         return transformations
 
     def _sort_extra_nodes(self, number_of_generator_nodes: int) -> list:
@@ -324,6 +337,7 @@ class RootedLevelKNetwork:
                 transformations.append(self.set_node_as_number(extra_node, number_of_generator_nodes + count))
                 count += 1
             transformations += self._sort_extra_nodes(number_of_generator_nodes)
+        self.logger.debug("Transformations needed to put extra nodes in order are {}.".format(transformations))
         return transformations
 
     def rename_node(self, old_name: str, new_name: str):
@@ -381,7 +395,7 @@ class RootedLevelKNetwork:
             self.node_names[self.node_names.inverse[y]] -= 1
         if self._is_leaf_node(node_name):
             self.leaf_names.remove(node_name)
-        return node_number
+        return int(node_number)
 
     def _add_internal_node_to_dict(self, node_name: str = None) -> str:
         """Add internal node to node_names dictionary. Returns its number."""
@@ -422,14 +436,18 @@ class RootedLevelKNetwork:
         self.adj_matrix[from_node_number][to_node_number] += 1
         self.adj_matrix[to_node_number][from_node_number] -= 1
 
-    def _remove_connection(self, from_node_name: str, to_node_name: str):
+    def _remove_connection(self, from_node_name: str, to_node_name: str) -> bool:
         """Remove connection between from_node_name and to_node_name."""
         self.logger.debug("Removing connection between {} and {}.".format(from_node_name, to_node_name))
         from_node_number = self._get_node_number(from_node_name)
         to_node_number = self._get_node_number(to_node_name)
 
+        if self.adj_matrix[from_node_number][to_node_number] == 0 or self.adj_matrix[to_node_number][from_node_number] == 0:
+            return False
+
         self.adj_matrix[from_node_number][to_node_number] -= 1
         self.adj_matrix[to_node_number][from_node_number] += 1
+        return True
 
     def _is_connected_node(self, node_name: str) -> bool:
         """Check whether node is connected to the graph."""
@@ -486,9 +504,6 @@ class RootedLevelKNetwork:
         self.logger.debug("Suppressing component {}.".format(component))
         in_nodes = self.get_in_nodes_component(component)
         out_nodes = self.get_out_nodes_component(component)
-        if component == ['1']:
-            print(in_nodes)
-            print(out_nodes)
         assert len(out_nodes) == 0 or len(out_nodes) <= 1 and len(
             in_nodes) <= 1, "Can not suppress node {} as it does not have at most one in and at most one out node".format(
             component)
@@ -600,7 +615,7 @@ class RootedLevelKNetwork:
         leafless_indicator = self.number_of_internals if leafless else self.number_of_nodes
         mask = self.adj_matrix[:leafless_indicator, node_number] > 0
         in_degree = sum(self.adj_matrix[:leafless_indicator, node_number][mask])
-        return in_degree
+        return int(in_degree)
 
     def get_out_degree_node(self, node_name: str, leafless: bool = False) -> int:
         """Retrieve number of arcs exiting node_name."""
@@ -609,7 +624,7 @@ class RootedLevelKNetwork:
         leafless_indicator = self.number_of_internals if leafless else self.number_of_nodes
         mask = self.adj_matrix[:leafless_indicator, node_number] < 0
         out_degree = abs(sum(self.adj_matrix[:leafless_indicator, node_number][mask]))
-        return out_degree
+        return int(out_degree)
 
     def get_in_degrees(self, leafless: bool = False) -> list:
         """Retrieve number of arcs entering each node."""
@@ -707,7 +722,7 @@ class RootedLevelKNetwork:
             return children
         return children
 
-    def _get_connected_components(self) -> list:
+    def _get_connected_components(self, leafless: bool = False) -> list:
         """Retrieve the connected components (excluding leaves) of the network."""
         self.logger.debug("Computing connected components.")
         # Finds set of connected components
@@ -723,25 +738,31 @@ class RootedLevelKNetwork:
                 connection_name = unchecked_connections.pop()
                 unchecked_nodes.remove(connection_name)
                 new_connections = set(self.get_connections_node(connection_name))
-                unchecked_connections = unchecked_connections.union(new_connections).intersection(unchecked_nodes)
+                unchecked_connections = (unchecked_connections.union(new_connections)).intersection(unchecked_nodes)
                 component.append(connection_name)
+            if not(leafless and len(component) == 1 and self._is_leaf_node(component[0])):
                 components.append(component)
+        self.logger.debug("Connected components are {}.".format(components))
         return components
 
-    def get_biconnected_components(self) -> list:
+    def get_biconnected_components(self, leafless: bool = False) -> list:
         """Compute biconnected components."""
         self.logger.debug("Computing biconnected components")
         cut_arc_matrix = self._get_cut_arc_matrix()
         cut_adj_matrix = copy.deepcopy(self.adj_matrix) - cut_arc_matrix
         cut_network = RootedLevelKNetwork(adj_matrix=cut_adj_matrix, node_names=self.node_names, leaf_names=self.leaf_names, level=self.level,
                                           dimension=self.dimension)
-        return cut_network._get_connected_components()
+        biconnected_components = cut_network._get_connected_components(leafless=leafless)
+        self.logger.debug("Biconnected components are {}".format(biconnected_components))
+        return biconnected_components
 
-    def is_biconnected(self):
+    def is_biconnected(self, leafless: bool = False) -> bool:
         """Check if network is biconnected"""
         self.logger.debug("Checking if network is biconnected.")
-        biconnected_components = self.get_biconnected_components()
-        return len(biconnected_components) == 1
+        biconnected_components = self.get_biconnected_components(leafless=leafless)
+        is_bc = len(biconnected_components) == 1
+        self.logger.debug("Biconnected = {}.".format(bool(is_bc)))
+        return is_bc
 
     def cut_arc_sets(self) -> list:
         """Retrieve cut-arc sets of network."""
@@ -750,7 +771,7 @@ class RootedLevelKNetwork:
         _, to_nodes = np.where(cut_arc_matrix == 1)
         result = []
         for to_node in to_nodes:
-            ca_set = np.array(self.get_leaf_children({self._get_node_name(to_node)}))
+            ca_set = list(self.get_leaf_children({self._get_node_name(to_node)}))
             ca_set.sort()
             result.append(ca_set)
         return result
@@ -777,7 +798,9 @@ class RootedLevelKNetwork:
     def _is_cut_arc(self, from_node_name: str, to_node_name: str) -> bool:
         """Check if arc (from_node, to_node) is a cut-arc."""
         self.logger.debug("Checking if arc from {} to {} is a cut-arc.".format(from_node_name, to_node_name))
-        self._remove_connection(from_node_name, to_node_name)
+        removed = self._remove_connection(from_node_name, to_node_name)
+        if not removed:
+            return False
         new_components = self._get_connected_components()
         self._add_connection(from_node_name, to_node_name)
         if len(new_components) > 1:
@@ -803,7 +826,7 @@ class RootedLevelKNetwork:
     def _is_structure_node(self, node_name: str) -> bool:
         """Check if node_name is necessary for the structure: not directly connected to any leaves."""
         self.logger.debug("Checking if {} is a structure node.".format(node_name))
-        return (not self._is_leaf_node(node_name)) and self.get_out_degree_node(node_name, leafless=True) == 0
+        return (not self._is_leaf_node(node_name)) and (self.get_out_degree_node(node_name, leafless=False) - self.get_out_degree_node(node_name, leafless=True) ==  0)
 
     def _is_connection_node(self, node_name: str) -> bool:
         """Check if node node_name is not part of underlying generator or leaf"""
@@ -850,7 +873,7 @@ class RootedLevelKNetwork:
         self.logger.debug("Retrieving the underlying generator of the network.")
         generator_nodes = self.get_generator_nodes()
         generator_nodes_leaves = self.get_leaf_children(set(generator_nodes), 1)
-        return RootedLevelKNetwork.from_network(self, generator_nodes_leaves)
+        return RootedLevelKNetwork.from_network(self, generator_nodes_leaves, suppress_redundant='none', suppress_parallel=False)
 
     def get_edges(self, leafless: bool = False) -> list:
         """Retrieve all the edges (from_node, to_node) in the network."""
@@ -914,8 +937,7 @@ class RootedLevelKNetwork:
             # Check for redundant components:
             if suppress_redundant != 'none':
                 bcs_to_remove = []
-                bcs = self.get_biconnected_components()
-                print("---------", bcs)
+                bcs = self.get_biconnected_components(leafless=True)
                 for bc in bcs:
                     if suppress_redundant == 'strongly' and self._is_strongly_redundant_component(bc):
                         bcs_to_remove.append(bc)
@@ -965,7 +987,8 @@ class RootedLevelKNetwork:
         """Switch rows and columns corresponding to nodes from place in adjacency matrix"""
         self.logger.debug("Switch rows and columns corresponding to nodes {} and {} from place in adjacency matrix.".format(node_name_1, node_name_2))
         # Switches node place in matrix
-        assert not (self._is_leaf_node(node_name_1) ^ self._is_leaf_node(node_name_2)), "WARNING: can not switch nodes {} and {} as exactly one is a leaf".format(node_name_1, node_name_2)
+        assert not (self._is_leaf_node(node_name_1) ^ self._is_leaf_node(
+            node_name_2)), "WARNING: can not switch nodes {} and {} as exactly one is a leaf".format(node_name_1, node_name_2)
 
         x = self._get_node_number(node_name_1)
         y = self._get_node_number(node_name_2)
@@ -1021,8 +1044,9 @@ class RootedLevelKNetwork:
             dot.edge(edge[0], edge[1])
 
         dot.render(view=True)
+        time.sleep(0.2)
 
-    def to_df(self, directed: bool = True):
+    def to_df(self, directed: bool = True) -> pd.DataFrame:
         """Retrieve dataframe representation of network."""
         self.logger.debug("Retrieve {}directed dataframe representation of network.".format("" if directed else "un-"))
         ordered_node_names = self._get_ordered_node_names()
@@ -1042,20 +1066,21 @@ class RootedLevelKNetwork:
             return False
         if not self.number_of_internals == other.number_of_internals:
             return False
-        if not np.array_equal(self.adj_matrix[:, :self.number_of_internals],
-                              other.adj_matrix[:, :other.number_of_internals]):
+        if not np.array_equal(self.adj_matrix[:self.number_of_internals, :self.number_of_internals].astype(int),
+                              other.adj_matrix[:other.number_of_internals, :other.number_of_internals].astype(int)):
             return False
         return True
 
     def __str__(self):
-        return str(self.node_names) + str("\n") + str(self.adj_matrix)
+        return str(self.to_df())
 
     def __getstate__(self):
         self.logger = 'network.{}'.format(self.uid)
-        return self.__dict__
+        result = copy.deepcopy(self.__dict__)
+        self.logger = logging.getLogger(self.logger)
+        return result
 
     def __setstate__(self, d):
         self.__dict__ = d
         self.logger = logging.getLogger(self.logger)
         return self.__dict__
-

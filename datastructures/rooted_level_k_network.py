@@ -197,6 +197,7 @@ class RootedLevelKNetwork:
             transformations = self._to_standard_form_2()
         else:
             raise AssertionError
+        transformations += self._sort_leaves()
         self.logger.debug("Transformations needed to put in standard form are {}.".format(transformations))
         return transformations
 
@@ -338,6 +339,20 @@ class RootedLevelKNetwork:
                 count += 1
             transformations += self._sort_extra_nodes(number_of_generator_nodes)
         self.logger.debug("Transformations needed to put extra nodes in order are {}.".format(transformations))
+        return transformations
+
+    def _sort_leaves(self):
+        leaves = self._get_node_names(list(range(self.number_of_internals, self.number_of_nodes)))
+        parent_number = [np.where(self.adj_matrix[:, i] == 1)[0][0] for i in
+                         range(self.number_of_internals, self.number_of_nodes)]
+        combined = zip(parent_number, leaves)
+        order = sorted(combined)
+        _, ordering = zip(*order)
+        transformations = []
+        count = 0
+        for leaf in ordering:
+            transformations.append(self.set_node_as_number(leaf, self.number_of_internals + count))
+            count += 1
         return transformations
 
     def rename_node(self, old_name: str, new_name: str):
@@ -1054,7 +1069,7 @@ class RootedLevelKNetwork:
         data = self.adj_matrix * mask if directed else self.adj_matrix
         length = self.number_of_internals if directed else self.number_of_nodes
         result = pd.DataFrame(columns=ordered_node_names, index=ordered_node_names[:length], data=data[:length])
-        return result
+        return result.astype(int)
 
     def _get_component_list_names(self, component_list: list) -> list:
         """Retrieve names of list of lists of node numbers."""

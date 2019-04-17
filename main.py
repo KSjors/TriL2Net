@@ -36,35 +36,33 @@ filename_save_trinets_B = 'data/trinets_B'
 
 
 """ Build or load trinets """
-# regenerate_trinets()
+regenerate_trinets()
 all_generators, all_trinets, all_trinets_gen_sides = get_trinets()
 
 """ Build or load network """
 # dct = test_networks.connections_big
 # network = RootedLevelKNetwork.from_connections_dict(dct)
 # pickle_save("data/network_B.pickle", network)
-network = pickle_read("data/network_B.pickle")
+# network = pickle_read("data/network_B.pickle")
 # network.visualize()
 
 
 """ Build or load trinets """
 # trinets = network.get_exhibited_trinets()
 # pickle_save('data/trinets_B', trinets)
-trinets = pickle_read('data/trinets_B')
+# trinets = pickle_read('data/trinets_B')
 
-trinet_set = TrinetSet.from_trinet_list(trinets)
+""" Build or load trinet set """
+# trinet_set = TrinetSet.from_trinet_list(trinets)
 
-# trinet = RootedLevelKNetwork.from_network(network, {'H', 'I', 'J'})
-# trinet.visualize()
-# trinet._to_block_form()
-# print(trinet)
-# # print(trinet.get_generator_nodes())
-# print(trinet in all_trinets)
 
-solver = Solver(trinet_set)
-print(solver.next_transform())
-k = solver.next_transform()
-print(k)
-print(solver.next_transform())
-print(solver.next_transform())
-print(solver.next_transform())
+""" Play around """
+i=0
+# 24, 25, 26, 27, 28, 29
+# 30, 31
+#
+for tn in all_trinets:
+    print("--------------", i, "-------------")
+    i += 1
+    print(tn)
+    print("")

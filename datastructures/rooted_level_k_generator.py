@@ -47,11 +47,11 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
             if not set(from_nodes).isdisjoint(dont_end_in_nodes):
                 continue
 
-            # Check if symmetry of extra_leaves has already been done
-            if is_symmetry(self.symmetrical_nodes, symmetry_check_list, extra_leaves):
-                continue
-            else:
-                symmetry_check_list.append(extra_leaves)
+            # # Check if symmetry of extra_leaves has already been done
+            # if is_symmetry(self.symmetrical_nodes, symmetry_check_list, extra_leaves):
+            #     continue
+            # else:
+            #     symmetry_check_list.append(extra_leaves)
 
             # Add extra leaves to base net and save together with underlying generator (self) and added edges
             current_trinet = RootedLevelKNetwork.copy_network(base_net)

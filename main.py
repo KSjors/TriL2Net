@@ -31,38 +31,46 @@ import data.generators as generator
 from data.all_trinets import *
 from utils.help_functions import *
 
+rebuild = {
+    'generators': 0
+    , 'network':  0
+    , 'trinets':  0
+}
+
 os.environ["PATH"] += os.pathsep + 'C:/Program Files (x86)/Graphviz2.38/bin/'
 filename_save_trinets_B = 'data/trinets_B'
 
-
 """ Build or load trinets """
-regenerate_trinets()
-all_generators, all_trinets, all_trinets_gen_sides = get_trinets()
+if rebuild['generators']:
+    regenerate_trinets()
+all_generators, trinet_lookup_dict = get_trinets()
+
+for trinet, dct in trinet_lookup_dict.items():
+    if dct['generator'].level == 1:
+        trinet.visualize()
 
 """ Build or load network """
-# dct = test_networks.connections_big
-# network = RootedLevelKNetwork.from_connections_dict(dct)
-# pickle_save("data/network_B.pickle", network)
-# network = pickle_read("data/network_B.pickle")
-# network.visualize()
-
+if rebuild['network']:
+    dct = test_networks.connections_big
+    network = RootedLevelKNetwork.from_connections_dict(dct)
+    pickle_save("data/network_B.pickle", network)
+network = pickle_read("data/network_B.pickle")
 
 """ Build or load trinets """
-# trinets = network.get_exhibited_trinets()
-# pickle_save('data/trinets_B', trinets)
-# trinets = pickle_read('data/trinets_B')
+if rebuild['trinets'] or rebuild['network']:
+    trinets = network.get_exhibited_trinets()
+    pickle_save('data/trinets_B', trinets)
+trinets = pickle_read('data/trinets_B')
 
 """ Build or load trinet set """
-# trinet_set = TrinetSet.from_trinet_list(trinets)
+trinet_set = TrinetSet.from_trinet_list(trinets)
+# trinet_set.remove_trinet(["J", 'H', 'G'])
 
+""" Solver """
+solver = Solver(trinet_set)
 
 """ Play around """
-i=0
-# 24, 25, 26, 27, 28, 29
-# 30, 31
-#
-for tn in all_trinets:
-    print("--------------", i, "-------------")
-    i += 1
-    print(tn)
-    print("")
+
+network.visualize()
+
+a1 = solver.solve()

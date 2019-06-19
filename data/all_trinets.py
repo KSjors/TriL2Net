@@ -1,5 +1,6 @@
 import data.generators as generators
 from datastructures.rooted_level_k_network import *
+from bidict import bidict
 import pickle
 
 
@@ -19,16 +20,23 @@ def pickle_read(filename):
 def regenerate_trinets() -> None:
     """Regenerate and save all possible trinets."""
     logging.debug("Regenerating all possible trinets and saving them.")
-    all_generators = [generators.generator_level0, generators.generator_level1, generators.generator_A, generators.generator_B, generators.generator_C, generators.generator_D]
+    all_generators = {
+        0 : [generators.generator_level0]
+        , 1: [generators.generator_level1]
+        , 2: [generators.generator_A, generators.generator_B, generators.generator_C, generators.generator_D]
+    }
     # 1, 2, 15, 6, 2, 6
     # 0 - 1 - 3 - 18 - 24 - 26 - 32
-    all_trinets_gen_sides = []
-    for generator in all_generators:
-        all_trinets_gen_sides += generator.build_trinets()
+    trinet_lookup_dict = {}
+    for level, generator_list in all_generators.items():
+        for generator in generator_list:
+            trinet_info = generator.build_trinets()
+            for trinet, info in trinet_info.items():
+                trinet_lookup_dict[trinet] = {'generator': generator, 'on_edges': info['on_edges']}
 
     pickle_out = open("data/all_trinets_save.pickle", 'wb')
-    data = [all_generators, all_trinets_gen_sides]
-    pickle.dump(data,  pickle_out)
+    data = [all_generators, trinet_lookup_dict]
+    pickle.dump(data, pickle_out)
     pickle_out.close()
 
 
@@ -38,6 +46,5 @@ def get_trinets() -> (list, list, list):
     pickle_in = open("data/all_trinets_save.pickle", 'rb')
     result = pickle.load(pickle_in)
     pickle_in.close()
-    all_generators, all_trinets_gen_sides = result[0], result[1]
-    all_trinets = [x[0] for x in all_trinets_gen_sides]
-    return all_generators, all_trinets, all_trinets_gen_sides
+    all_generators, trinet_lookup_dict = result[0], result[1]
+    return all_generators, trinet_lookup_dict

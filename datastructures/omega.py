@@ -14,11 +14,7 @@ class Omega:
         self.taxa_names = trinet_set.taxa_names
         cut_arc_sets_per_triplet = trinet_set.cut_arc_sets_per_triplet()
 
-        triplets = itertools.combinations(self.taxa_names.keys(), 3)
-        for triplet in triplets:
-            triplet = [X for X in triplet]
-            triplet.sort()
-            cut_arc_sets = cut_arc_sets_per_triplet[str(triplet)]
+        for triplet, cut_arc_sets in cut_arc_sets_per_triplet.items():
             for cut_arc_set in cut_arc_sets:
                 if len(cut_arc_set) == 2:
                     x = self.taxa_names[cut_arc_set[0]]

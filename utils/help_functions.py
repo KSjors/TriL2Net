@@ -37,7 +37,7 @@ def is_symmetry(symmetrical_nodes, symmetry_check_list, list_of_lists):
     """Check if one of list of lists isomorphisms (def by symmetrical nodes) is in symmetry_check_list"""
     logging.debug("Checking if {} is a symmetry of one of {} through {}.".format(list_of_lists, symmetry_check_list, symmetrical_nodes))
     number_of_symmetries = len(symmetrical_nodes)
-    symmetry_iterator = all_combinations(list(symmetrical_nodes), 1, number_of_symmetries+1)
+    symmetry_iterator = all_combinations(list(symmetrical_nodes), 1, number_of_symmetries + 1)
     for symmetries in symmetry_iterator:
         current_symmetry_bidict = bidict()
         for node in symmetries:
@@ -69,3 +69,12 @@ def guid():
     uid = hashlib.md5(data.encode('utf-8')).hexdigest()
     logging.debug("Generated unique ID: {}.".format(uid))
     return uid
+
+
+def leaf_names_to_identifier(leaf_names: list) -> str:
+    alphabetical_leaf_names = sorted(copy.copy(leaf_names))
+    return tuple(alphabetical_leaf_names)
+
+
+def mss_leaf_name(mss):
+    return '(' + "".join(sorted(mss)) + ')'

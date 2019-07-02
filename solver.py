@@ -31,7 +31,7 @@ class Solver:
         if len(self.trinet_sets[-1].taxa_names) == 2:
             self.last_transform()
             return False
-        elif  len(self.trinet_sets[-1].taxa_names) == 1:
+        elif len(self.trinet_sets[-1].taxa_names) == 1:
             return False
         mss = self.get_next_mss()
         biconnected_component = self.transform(mss)
@@ -39,6 +39,7 @@ class Solver:
         component, taxa = self.expand_mss(biconnected_component)
         self.components[component] = taxa
         self.logger.info(f"Created component {biconnected_component.uid} for minimal sink-set {mss}.")
+        biconnected_component.visualize()
         return True
 
     def last_transform(self):

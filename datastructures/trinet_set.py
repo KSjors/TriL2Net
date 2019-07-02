@@ -10,12 +10,14 @@ from utils.help_functions import guid, leaf_names_to_identifier, mss_leaf_name
 from datastructures.rooted_level_k_network import *
 from datastructures.rooted_level_k_generator import *
 from data.all_trinets import get_trinets
+from graphviz import Digraph
 import pprint
 import itertools
 
 all_generators, trinet_lookup_dict = get_trinets()
 
 pp = pprint.PrettyPrinter(indent=4)
+
 
 class TrinetSet:
     def __init__(self, trinet_dict: dict, taxa_names: bidict):
@@ -187,6 +189,8 @@ class MssTrinetSet(TrinetSet):
                 result.add_trinet(trinet_set.trinet_dict[trinet_identifier])
             except KeyError:
                 result.missing_trinets.append(triplet)
+                print(triplet)
+                kkk
 
         result.logger.info(f"MSS info contains trinets {result.mss_info}")
         return result
@@ -227,16 +231,22 @@ class MssTrinetSet(TrinetSet):
         underlying_generator = method(max_count_generators)
         self.underlying_generator = underlying_generator
 
-        # Remove inconsistent trinets
-        for generator, leaf_name_on_edge_dict in self.mss_info[self.underlying_generator_level].items():
-            # TODO check if this properly removes 'false' trinets
-            if generator != underlying_generator:
-                for leaf_names in leaf_name_on_edge_dict:
-                    trinet_identifier = leaf_names_to_identifier(list(leaf_names))
-                    self.inconsistent_trinet_dict[trinet_identifier] = self.trinet_dict.pop(trinet_identifier)
+        # Remove all trinets with same or higher underlying level but different underlying generator
+        # TODO: remove inconsistent trinets at all?
+        temp_dict = copy.deepcopy(self.mss_info)
+        for level in range(self.underlying_generator_level, 2 + 1):
+            for generator, leaf_name_on_edge_dict in temp_dict[level].items():
+                # TODO check if this properly removes 'false' trinets
+                if generator != underlying_generator:
+                    for leaf_names in leaf_name_on_edge_dict:
+                        trinet_identifier = leaf_names_to_identifier(list(leaf_names))
+                        self.inconsistent_trinet_dict[trinet_identifier] = self.trinet_dict.pop(trinet_identifier)
+                    self.mss_info[level].pop(generator)
+        # TODO: Remove trinets with lower level which are also inconsistent. e.g. If underlying generator is
+        #  2a with reticulation A, there can not be a trinet with reticulation A of level-1.
+        #  However, 2d with reticulation A does allow for a trinet with reticulation A of level-1
 
     def set_on_edge_leaf_dict_and_reticulation_set(self):
-
         self.logger.info("Computing edge-leaf dict and reticulation list")
         if self.underlying_generator is None:
             self.set_underlying_generator()
@@ -266,6 +276,7 @@ class MssTrinetSet(TrinetSet):
             max_occurrence = max(on_edges.values())
             max_occurring_edges = [edge for edge, occurrence in list(on_edges.items()) if occurrence == max_occurrence]
             actual_leaf_on_edge_dict[leaf] = max_occurring_edges[0]
+        # TODO: remove trinets which have this leaf on a different side?
 
         # Invert dict. From leaf: edge dict to edge: leaf dict
         self.on_edge_leaf_dict = {}
@@ -283,6 +294,31 @@ class MssTrinetSet(TrinetSet):
             leaf_name_map.put(leaf, i)
             i += 1
         score_matrix = np.zeros((i, i))
+
+        leaves = set(leaves)
+
+        for level, generator_dict in self.mss_info.items():
+            for generator, trinet_info_dict in generator_dict.items():
+                for leaf_names, on_edges in trinet_info_dict.items():
+                    if len(set(leaf_names).intersection(leaves)) >= 2:
+                        current_leaves = set(leaf_names).intersection(leaves)
+
+                        trinet_identifier = leaf_names_to_identifier(leaf_names)
+                        trinet = self.trinet_dict[trinet_identifier]
+                        print(trinet, on_edges)
+
+                        # leaf_orderings = trinet.get_leaf_ordering()
+                        # for leaf_ordering in leaf_orderings:
+                        #     try:
+                        #         first_index = leaf_ordering.index(current_leaves[0])
+                        #         second_index = leaf_ordering.index(current_leaves[1])
+                        #         if first_index > second_index:
+                        #
+                        #     except:
+                        #
+                        # else:
+                        #     raise AssertionError("Trinet has more than 1 cut-arc set.")
+
         for reticulation in self.reticulations:
             # TODO use all trinets?
             two_leaf_iterator = itertools.combinations(leaves, 2)
@@ -290,6 +326,8 @@ class MssTrinetSet(TrinetSet):
                 triplet = list(two_leaves) + [reticulation]
                 trinet_identifier = leaf_names_to_identifier(triplet)
                 trinet = self.trinet_dict[trinet_identifier]
+                level = len(trinet.get_reticulations())
+
                 cut_arc_set = [cut_arc_set for cut_arc_set in trinet.cut_arc_sets() if len(cut_arc_set) == 2]
                 leaf_names = trinet.leaf_names
                 leaf_names.remove(reticulation)
@@ -304,9 +342,26 @@ class MssTrinetSet(TrinetSet):
                     undeep_leaf_number = leaf_name_map[leaf_names[0]]
                     deep_leaf_number = leaf_name_map[leaf_names[1]]
                 score_matrix[undeep_leaf_number, deep_leaf_number] += 1
+        self.visualize_tournament(score_matrix, leaf_name_map)
         ranking = self.determine_ranking(score_matrix=score_matrix)
         ranked_leaves = [leaf_name_map.inverse[number] for number in ranking]
         return ranked_leaves
+
+    @staticmethod
+    def visualize_tournament(tournament: np.ndarray, leaf_name_map: bidict):
+        dot = Digraph()
+        dot.engine = 'dot'
+
+        for leaf_name, number in leaf_name_map.items():
+            dot.node(str(number), leaf_name)
+
+        for i in range(tournament.shape[0]):
+            for j in range(tournament.shape[1]):
+                if tournament[i, j] > 0:
+                    dot.edge(str(i), str(j))
+
+        dot.render(view=True)
+        time.sleep(0.2)
 
     def determine_ranking(self, score_matrix, ranking=None):
         score_matrix = copy.copy(score_matrix)

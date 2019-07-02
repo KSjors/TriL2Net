@@ -79,9 +79,10 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
             edges_iterator = itertools.combinations(all_edges, 1)
             for edge in edges_iterator:
                 current_trinet = RootedLevelKNetwork.copy_network(base_net)
-                new_node_name, _ = current_trinet.add_leaf_to_edge(edge[0][0], edge[0][1])
-                _, leaf_name = current_trinet.add_leaf_to_edge(new_node_name, edge[0][1])
-                extra_leaf_dict[leaf_name] = edge[0]
+                new_node_name, leaf_name_1 = current_trinet.add_leaf_to_edge(edge[0][0], edge[0][1])
+                extra_leaf_dict[leaf_name_1] = edge[0]
+                _, leaf_name_2 = current_trinet.add_leaf_to_edge(new_node_name, edge[0][1])
+                extra_leaf_dict[leaf_name_2] = edge[0]
                 # extra_leaf_dict.update(necessary_leaf_dict)
                 current_trinet.prune()
                 if current_trinet.number_of_internals_leaves_reticulations()[2] != self.level:

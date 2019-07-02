@@ -32,9 +32,9 @@ from data.all_trinets import *
 from utils.help_functions import *
 
 rebuild = {
-    'generators': 0
-    , 'network':  0
-    , 'trinets':  0
+    'generators': 1
+    , 'network':  1
+    , 'trinets':  1
 }
 
 os.environ["PATH"] += os.pathsep + 'C:/Program Files (x86)/Graphviz2.38/bin/'
@@ -45,9 +45,10 @@ if rebuild['generators']:
     regenerate_trinets()
 all_generators, trinet_lookup_dict = get_trinets()
 
-for trinet, dct in trinet_lookup_dict.items():
-    if dct['generator'].level == 1:
-        trinet.visualize()
+# for trinet, dct in trinet_lookup_dict.items():
+#     if dct['generator'].level == 1:
+#         trinet.visualize()
+#         print(dct)
 
 """ Build or load network """
 if rebuild['network']:
@@ -71,6 +72,3 @@ solver = Solver(trinet_set)
 
 """ Play around """
 
-network.visualize()
-
-a1 = solver.solve()

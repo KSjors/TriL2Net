@@ -9,12 +9,17 @@ import numpy as np
 import pandas as pd
 import copy
 import itertools
+from utils.help_functions import coalesce
 from tqdm import tqdm
 from bidict import bidict
 from graphviz import Digraph
-from utils.help_functions import leaf_name_iterator, guid, leaf_names_to_identifier
+from utils.help_functions import *
+from tarjan import tarjan
 import time
 import os
+import pprint
+
+pp = pprint.PrettyPrinter(indent=4)
 
 os.environ["PATH"] += os.pathsep + 'C:/Program Files (x86)/Graphviz2.38/bin/'
 
@@ -42,29 +47,44 @@ class RootedLevelKNetwork:
         self.dimension = dimension
 
     # ---------------------------------------------------------------- CLASS METHODS ---------------------------------------------------------------- #
-    @classmethod
-    def copy_network(cls, network):
-        """Copy network."""
-        logging.debug("Copying network {}.".format(network.uid))
-        network.logger.debug("Being copied.".format(network.uid))
-        adj_matrix = copy.deepcopy(network.adj_matrix)
-        node_name_map = copy.deepcopy(network.node_name_map)
-        leaf_names = copy.deepcopy(network.leaf_names)
-        level = copy.copy(network.level)
-        dimension = copy.copy(network.dimension)
-        network_copy = cls(adj_matrix=adj_matrix, node_name_map=node_name_map, leaf_names=leaf_names, level=level, dimension=dimension)
-        network_copy.logger.debug("Copy of network {}.".format(network.uid))
-        return network_copy
+    def __copy__(self):
+        cls = self.__class__
+        cp = cls.__new__(cls)
+        cp.adj_matrix = copy.copy(self.adj_matrix)
+        cp.node_name_map = copy.copy(self.node_name_map)
+        cp.leaf_names = copy.copy(self.leaf_names)
+        cp.number_of_leaves = copy.copy(self.number_of_leaves)
+        cp.number_of_nodes = copy.copy(self.number_of_nodes)
+        cp.number_of_internals = copy.copy(self.number_of_internals)
+        cp.level = copy.copy(self.level)
+        cp.dimension = copy.copy(self.dimension)
+        cp.uid = guid()
+        cp.logger = logging.getLogger('network.{}'.format(self.uid))
+        return cp
+
+    def __deepcopy__(self, memo):
+        cls = self.__class__
+        cp = cls.__new__(cls)
+        cp.adj_matrix = copy.deepcopy(self.adj_matrix)
+        cp.node_name_map = copy.deepcopy(self.node_name_map)
+        cp.leaf_names = copy.deepcopy(self.leaf_names)
+        cp.number_of_leaves = copy.deepcopy(self.number_of_leaves)
+        cp.number_of_nodes = copy.deepcopy(self.number_of_nodes)
+        cp.number_of_internals = copy.deepcopy(self.number_of_internals)
+        cp.level = copy.deepcopy(self.level)
+        cp.dimension = copy.deepcopy(self.dimension)
+        cp.uid = guid()
+        cp.logger = logging.getLogger('network.{}'.format(self.uid))
+        return cp
 
     @classmethod
     def trinet_from_network(cls, network, taxa: list):
         """Create trinet from network."""
         logging.debug("Creating trinet from network {} using {}.".format(network.uid, taxa))
         network.logger.debug("Creating trinet using {}.".format(taxa))
-        assert len(taxa), "Can not create trinet from network {} using as this {} are more than 3 leaves.".format(network.uid, taxa)
-        trinet = RootedLevelKNetwork.from_network(network, taxa, suppress_redundant='all', suppress_parallel=True)
+        assert len(taxa) <= 3, "Can not create trinet from network {} using as this {} are more than 3 leaves.".format(network.uid, taxa)
+        trinet = cls.from_network(network, taxa, suppress_redundant='all', suppress_parallel=True)
         trinet.logger.debug("Trinet of network {} with taxa {}.".format(network.uid, taxa))
-        trinet.to_standard_form()
         return trinet
 
     @classmethod
@@ -167,188 +187,6 @@ class RootedLevelKNetwork:
                 self.uid, bc, number_of_reticulations, self.level)
         return True
 
-    # ---------------------------------------------------------------- SORTING METHODS ---------------------------------------------------------------- #
-    def _to_block_form(self) -> int:
-        """Put adjacency matrix in block form. Returns number of generator nodes."""
-        self.logger.debug("Putting adjacency matrix in block form.")
-        generator_nodes = self.get_generator_nodes()
-        count = 0
-        transformations = []
-        for node in generator_nodes:
-            transformations.append(self.set_node_as_number(node, count))
-            count += 1
-        self.logger.debug("Transformations needed to put in block form are {}.".format(transformations))
-        return count
-
-    def to_standard_form(self) -> list:
-        return list()
-        # self.logger.debug("Putting adjacency matrix in standard form.")
-        # ints, leaves, rets = self.number_of_internals_leaves_reticulations()
-        # assert leaves == 3, "Trinet {} does not have exactly three leaves --> can not put in standard form.".format(self.uid)
-        # self.logger.debug("Number of reticulations is {}.".format(rets))
-        # if rets == 0:
-        #     transformations = self._to_standard_form_0()
-        # elif rets == 1:
-        #     transformations = self._to_standard_form_1()
-        # elif rets == 2:
-        #     transformations = self._to_standard_form_2()
-        # else:
-        #     raise AssertionError('Trinet has to many reticulations')
-        # transformations += self._sort_leaves()
-        # self.logger.debug("Transformations needed to put in standard form are {}.".format(transformations))
-        # return transformations
-
-    def _to_standard_form_0(self) -> list:
-        """Put adjacency matrix of level-0 trinet in standard form."""
-        self.logger.debug("Putting adjacency matrix in standard form (assuming level=0).")
-        root = self.get_root_name()
-        self.set_node_as_number(root, 0)
-        root_children = self.get_children({root}, 1).difference({root})
-        child_a = root_children.pop()
-        child_b = root_children.pop()
-        transformations = []
-        if not self._is_leaf_node(child_a):
-            transformations.append(self.set_node_as_number(child_a, 1))
-            transformations.append(self.set_node_as_number(child_b, 2))
-        else:
-            transformations.append(self.set_node_as_number(child_b, 1))
-            transformations.append(self.set_node_as_number(child_a, 2))
-        self.logger.debug("Transformations needed to put level-0 in standard form are {}.".format(transformations))
-        return transformations
-
-    def _to_standard_form_1(self) -> list:
-        """Put adjacency matrix of level-1 trinet in standard form."""
-        self.logger.debug("Putting adjacency matrix in standard form (assuming level=1).")
-
-        number_of_generator_nodes = self._to_block_form()
-
-        generator = self.get_generator_sub_network()
-        transformations = generator.to_standard_form_gen_1()
-        for transformation in transformations:
-            if len(transformation) == 2:
-                self.switch_nodes_in_adj_matrix(transformation[0], transformation[1])
-        transformations += self._sort_extra_nodes(number_of_generator_nodes)
-        self.logger.debug("Transformations needed to put level-1 in standard form are {}.".format(transformations))
-        return transformations
-
-    def to_standard_form_gen_1(self) -> list:
-        """Put level-1 generator adjacency matrix in standard form."""
-        self.logger.debug("Putting adjacency matrix in standard form (assuming level=1, generator).")
-        transformations = []
-        root = self.get_root_name()
-        transformations.append(self.set_node_as_number(root, 0))
-        root_children = set(self.get_children({root}, 1).difference({root}))
-        assert len(root_children) == 1, "Level-1 generator root has more than one child."
-
-        child_a = root_children.pop()
-        transformations.append(self.set_node_as_number(child_a, 1))
-        self.logger.debug("Transformations needed to put level-1 generator in standard form are {}.".format(transformations))
-        return transformations
-
-    def _to_standard_form_2(self) -> list:
-        """Put adjacency matrix of level-2 trinet in standard form."""
-        self.logger.debug("Putting adjacency matrix in standard form (assuming level=2).")
-        if not self.is_biconnected(leafless=True):
-            return []
-
-        number_of_generator_nodes = self._to_block_form()
-
-        # TODO: make a class function
-        generator = self.get_generator_sub_network()
-        transformations = generator.to_standard_form_gen_2()
-
-        for transformation in transformations:
-            if len(transformation) == 2:
-                self.switch_nodes_in_adj_matrix(transformation[0], transformation[1])
-        transformations += self._sort_extra_nodes(number_of_generator_nodes)
-        self.logger.debug("Transformations needed to put level-2 in standard form are {}.".format(transformations))
-        return transformations
-
-    def to_standard_form_gen_2(self) -> list:
-        """Put level-2 generator adjacency matrix in standard form."""
-        self.logger.debug("Putting adjacency matrix in standard form (assuming level=2, generator).")
-        transformations = []
-
-        root = self.get_root_name()
-        transformations.append(self.set_node_as_number(root, 0))
-
-        root_children = self.get_children({root}, 1).difference({root})
-        assert len(root_children) == 2, "Level-2 generator root does not have two children"
-        child_a = root_children.pop()
-        child_b = root_children.pop()
-
-        # Find out whose degree is (1, 2)
-        if self.get_in_out_degree_node(child_a) == (1, 2):
-            child_1 = child_a
-            child_2 = child_b
-        elif self.get_in_out_degree_node(child_b) == (1, 2):
-            child_1 = child_b
-            child_2 = child_a
-        else:
-            self.visualize()
-            raise AssertionError
-        # Set their numbers
-        transformations.append(self.set_node_as_number(child_1, 1))
-        transformations.append(self.set_node_as_number(child_2, 2))
-
-        # Set children of 1 other than 2 as 3 (and 4). In case of 3 and 4, child with degree (1, 2) as 3
-        children = self.get_children({child_1}, 1).difference({child_1, child_2})
-        child_c = children.pop()
-        try:
-            child_d = children.pop()
-            # Find out whose degree is (1, 2)
-            if self.get_in_out_degree_node(child_c) == (1, 2):
-                child_3 = child_c
-                child_4 = child_d
-            else:
-                child_3 = child_d
-                child_4 = child_c
-            transformations.append(self.set_node_as_number(child_3, 3))
-            transformations.append(self.set_node_as_number(child_4, 4))
-        except KeyError:
-            transformations.append(self.set_node_as_number(child_c, 3))
-        self.logger.debug("Transformations needed to put level-2 generator in standard form are {}.".format(transformations))
-        return transformations
-
-    def _sort_extra_nodes(self, number_of_generator_nodes: int) -> list:
-        """Put extra nodes of trinet in order."""
-        self.logger.debug("Putting extra nodes in order.")
-        # TODO: optimize (non-recursive)
-        # Ordering extra block based on depth of parent (first) and child (second)
-        extra_nodes = self.get_node_names_of(list(range(number_of_generator_nodes, self.number_of_internals)))
-        extra_nodes_copy = copy.deepcopy(extra_nodes)
-        parent_number = [np.where(self.adj_matrix[:, i] >= 1)[0][0] for i in
-                         range(number_of_generator_nodes, self.number_of_internals)]
-        child_number = [np.where(self.adj_matrix[:, i] <= -1)[0][0] for i in
-                        range(number_of_generator_nodes, self.number_of_internals)]
-        combined = zip(parent_number, child_number, extra_nodes)
-        minor_order = sorted(combined, key=lambda x: x[1])
-        major_order = sorted(minor_order, key=lambda x: x[0])
-        _, _, ordering = zip(*major_order)
-        transformations = []
-        if extra_nodes_copy != list(ordering):
-            count = 0
-            for extra_node in ordering:
-                transformations.append(self.set_node_as_number(extra_node, number_of_generator_nodes + count))
-                count += 1
-            transformations += self._sort_extra_nodes(number_of_generator_nodes)
-        self.logger.debug("Transformations needed to put extra nodes in order are {}.".format(transformations))
-        return transformations
-
-    def _sort_leaves(self):
-        leaves = self.get_node_names_of(list(range(self.number_of_internals, self.number_of_nodes)))
-        parent_number = [np.where(self.adj_matrix[:, i] == 1)[0][0] for i in
-                         range(self.number_of_internals, self.number_of_nodes)]
-        combined = zip(parent_number, leaves)
-        order = sorted(combined)
-        _, ordering = zip(*order)
-        transformations = []
-        count = 0
-        for leaf in ordering:
-            transformations.append(self.set_node_as_number(leaf, self.number_of_internals + count))
-            count += 1
-        return transformations
-
     # --------------------------------------------------------- NODE NAME <--> NODE NUMBER METHODS --------------------------------------------------------- #
     def get_node_names_of(self, node_number_list: list) -> list:
         """Retrieve names corresponding to node numbers."""
@@ -404,9 +242,9 @@ class RootedLevelKNetwork:
         return self.get_node_names_of(leaf_numbers)
 
     @leaf_names.setter
-    def leaf_names(self, leaf_names: set):
-        assert leaf_names.issubset(self.node_name_map), "Not all leaf names are in the network."
-        self._leaf_names = leaf_names
+    def leaf_names(self, leaf_names: list):
+        assert set(leaf_names).issubset(self.node_name_map), "Not all leaf names are in the network."
+        self._leaf_names = list(leaf_names)
 
     def is_connected_node(self, node_name: str) -> bool:
         """Check whether node is connected to the graph."""
@@ -425,7 +263,7 @@ class RootedLevelKNetwork:
     def standardize_internal_node_names(self):
         # Temporary names
         for internal_node in self.get_node_names_of(list(range(0, self.number_of_internals))):
-            self.rename_node(internal_node, internal_node + "renaming")
+            self.rename_node(internal_node, internal_node + "^")
 
         i = 0
         for internal_node in self.get_node_names_of(list(range(0, self.number_of_internals))):
@@ -446,6 +284,21 @@ class RootedLevelKNetwork:
         if old_name in self._leaf_names:
             self._leaf_names.remove(old_name)
             self._leaf_names.append(new_name)
+
+    def shrink(self, leaf_set):
+        """Shrink set of leaves"""
+        intersection = set(self.leaf_names).intersection(leaf_set)
+        if len(intersection) == len(self.leaf_names):
+            return False
+        if len(intersection) == 0:
+            return True
+        leaf_to_keep = intersection.pop()
+        for leaf in intersection:
+            self._remove_leaf_status_node(leaf)
+        self.prune()
+        mss_name = mss_leaf_name(leaf_set)
+        self.rename_node(leaf_to_keep, mss_name)
+        return mss_name
 
     def _remove_node_name_from_dict(self, node_name: str) -> int:
         """Remove node with name node_name from node_names dictionary."""
@@ -635,13 +488,13 @@ class RootedLevelKNetwork:
         assert self._is_leaf_node(leaf_name_to_replace), f"Cannot replace leaf {leaf_name_to_replace} with network as it is not a leaf."
         assert set(self.leaf_names).isdisjoint(
             replacement_network.leaf_names), f"Cannot replace leaf {leaf_name_to_replace} with network {replacement_network} as {replacement_network} has some leafs same as {self}"
-        replacement_network = RootedLevelKNetwork.copy_network(replacement_network)
+        replacement_network = copy.deepcopy(replacement_network)
         replacement_network_internal_nodes = set(replacement_network.node_names).difference(replacement_network.leaf_names)
-        replacement_network_root = replacement_network.get_root_name() + "'"
+        replacement_network_root = replacement_network.get_root_name() + "*"
 
         # Add internal nodes from replacement network to current network with primed names
         for node_name in replacement_network_internal_nodes:
-            self._add_internal_node_to_network(node_name + "'")
+            self._add_internal_node_to_network(node_name + "*")
 
         # Add leaves from replacement network to current network
         for leaf_name in replacement_network.leaf_names:
@@ -652,14 +505,14 @@ class RootedLevelKNetwork:
         self._remove_node_name_from_network(leaf_name_to_replace)
         self._add_connection(parent_of_leaf, replacement_network_root)
 
-        # Add all connections from replcament network to current network
+        # Add all connections from replacement network to current network
         for internal_node in replacement_network_internal_nodes:
             to_nodes = replacement_network.get_out_nodes_node(internal_node)
             for to_node in to_nodes:
                 if to_node in replacement_network_internal_nodes:
-                    self._add_connection(internal_node + "'", to_node + "'")
+                    self._add_connection(internal_node + "*", to_node + "*")
                 else:
-                    self._add_connection(internal_node + "'", to_node)
+                    self._add_connection(internal_node + "*", to_node)
 
     def _first_unused_leaf_name(self) -> str:
         """Find first unused leaf name in alphabetical order."""
@@ -990,15 +843,20 @@ class RootedLevelKNetwork:
             from_nodes += list(self.get_node_names_of(extra_from_nodes))
             to_nodes += list(self.get_node_names_of(extra_to_nodes))
             i += 1
-        return [[from_node, to_node] for from_node, to_node in zip(np.array(from_nodes), np.array(to_nodes))]
+        return [(from_node, to_node) for from_node, to_node in zip(np.array(from_nodes), np.array(to_nodes))]
 
     def prune(self, suppress_redundant: str = 'all', suppress_parallel: bool = True):
         """Suppress al unnecessary/redundant/parallel nodes/edges in network."""
         self.logger.debug("Pruning: Suppressing {} redundant components{}.".format(suppress_redundant, " and parallel edges" if suppress_parallel else ""))
         assert suppress_redundant in ('none', 'strongly', 'all'), "suppress_redundant parameter must be one of none, strongly, all."
 
-        changes = True
+        stable_ancestors, lowest_stable_ancestor, nodes_between = self.stable_ancestors(self.leaf_names)
 
+        for node_name in self.node_names:
+            if node_name not in nodes_between:
+                self._remove_node_name_from_network(node_name, force=True)
+
+        changes = True
         while changes:
             changes = False
             leaf_numbers = set(self.leaf_numbers)
@@ -1019,10 +877,6 @@ class RootedLevelKNetwork:
             one_entering_arc_nodes = set(np.where(in_degrees == 1)[0])
             one_entering_and_exiting_arc_nodes = one_entering_arc_nodes.intersection(one_exiting_arc_nodes)
             one_entering_and_exiting_arc_nodes = self.get_node_names_of(list(one_entering_and_exiting_arc_nodes))
-            #
-            # print("childless", childless_nodes)
-            # print("parentless one exiting", parentless_one_exiting_arc_nodes)
-            # print("one enter one exit", one_entering_and_exiting_arc_nodes)
 
             nodes_to_remove = list(set(childless_nodes + parentless_one_exiting_arc_nodes + one_entering_and_exiting_arc_nodes))
             for node in nodes_to_remove:
@@ -1033,7 +887,6 @@ class RootedLevelKNetwork:
             if suppress_parallel:
                 parallel_arcs = np.where(self.adj_matrix >= 2)
                 parallel_arcs = zip(self.get_node_names_of(parallel_arcs[0]), self.get_node_names_of(parallel_arcs[1]))
-                # print("Parallel", parallel_arcs)
                 for from_node, to_node in parallel_arcs:
                     changes = True
                     self._remove_connection(from_node, to_node)
@@ -1049,7 +902,12 @@ class RootedLevelKNetwork:
                         bcs_to_remove.append(bc)
                 for bc in bcs_to_remove:
                     changes = True
-                    self._suppress_component(bc)
+                    try:
+                        self._suppress_component(bc)
+                    except:
+                        print(stable_ancestors, lowest_stable_ancestor, nodes_between)
+                        self.visualize()
+                        kk
 
     def _is_redundant_component(self, component: list) -> bool:
         """Check if component is redundant."""
@@ -1126,17 +984,17 @@ class RootedLevelKNetwork:
             return [node_name, node_name_of_new_number]
         return [node_name]
 
-    def get_exhibited_trinets(self) -> list:
+    def get_exhibited_trinets(self):
         """Retrieve all trinets exhibited by network."""
         self.logger.debug("Retrieving all exhibited trinets.")
         leaves = self.get_node_names_of(list(range(self.number_of_internals, self.number_of_nodes)))
         triplets = itertools.combinations(leaves, 3)
-        trinets = []
+        trinet_info_list = TrinetInfoList()
         for triplet in tqdm(triplets):
             current_trinet = RootedLevelKNetwork.trinet_from_network(self, list(triplet))
-            current_trinet.to_standard_form()
-            trinets.append(current_trinet)
-        return trinets
+            trinet_info = TrinetInfo(current_trinet)
+            trinet_info_list.append(trinet_info)
+        return trinet_info_list
 
     def get_partial_ordering(self) -> list:
         root = self.get_root_name()
@@ -1191,6 +1049,45 @@ class RootedLevelKNetwork:
                         result.append(leaf_track_2)
         return [list(x) for x in set(tuple(x) for x in result)]
 
+    def stable_ancestors(self, node_names):
+        leafless_node_names = []
+        for node_name in node_names:
+            if self._is_leaf_node(node_name):
+                parent_of_leaf = self.get_parents({node_name}, max_height=1)
+                parent_of_leaf.remove(node_name)
+                node_name = parent_of_leaf.pop()
+            leafless_node_names.append(node_name)
+        partial_ordering = self.get_partial_ordering()
+        tracks_to_min_node = []
+        tracks_to_max_node = []
+        for track in partial_ordering:
+            mi = 10 ** 10
+            ma = -1
+            for node in leafless_node_names:
+                try:
+                    mi = min(mi, track.index(node))
+                    ma = max(ma, track.index(node))
+                except ValueError:
+                    pass
+            if mi != 10 ** 10:
+                tracks_to_min_node.append(track[:mi + 1])
+                tracks_to_max_node.append(track[:ma + 1])
+
+        stable_ancestors = (set(tracks_to_min_node[0]).intersection(*tracks_to_min_node))
+        stable_ancestors_indicis_dict = {tracks_to_min_node[0].index(sa): sa for sa in stable_ancestors}
+        lowest_stable_ancestor_index = max(stable_ancestors_indicis_dict.keys())
+        lowest_stable_ancestor = stable_ancestors_indicis_dict[lowest_stable_ancestor_index]
+
+        tracks_between_nodes = []
+        for track in tracks_to_max_node:
+            lowest_stable_ancestor_index = track.index(lowest_stable_ancestor)
+            tracks_between_nodes.append(track[lowest_stable_ancestor_index:])
+
+        nodes_between = set(tracks_between_nodes[0]).union(*tracks_between_nodes)
+        nodes_between.update(leafless_node_names)
+        nodes_between.update(node_names)
+        return stable_ancestors_indicis_dict, lowest_stable_ancestor, nodes_between
+
     def visualize(self, file_path: str = None):
         """Visualize network."""
         self.logger.debug("Visualizing network.")
@@ -1240,12 +1137,10 @@ class RootedLevelKNetwork:
         return True
 
     def equal_structure(self, other):
-        if not self.__class__ == other.__class__:
-            return False
         if not self.number_of_internals == other.number_of_internals:
-            return False
+            return dict()
         if not self.adj_matrix.shape == other.adj_matrix.shape:
-            return False
+            return dict()
 
         self_root = self.get_root_name()
         other_root = other.get_root_name()
@@ -1256,25 +1151,28 @@ class RootedLevelKNetwork:
         self_matrix = (self.adj_matrix > 0).astype(int)
         other_matrix = (other.adj_matrix > 0).astype(int)
 
-        return self._equal_structure(self_matrix, other_matrix, self_root_number, other_root_number)
+        relation_dict = dict()
+        equal = self._equal_structure(self_matrix, other_matrix, self_root_number, other_root_number, relation_dict)
+        if equal:
+            return bidict({self.get_node_name_of(key): other.get_node_name_of(value) for key, value in relation_dict.items()})
+        else:
+            return bidict()
 
-    def _equal_structure(self, matrix_1, matrix_2, root_1, root_2):
+    def _equal_structure(self, matrix_1, matrix_2, root_1, root_2, relation_dict):
         if sum(matrix_1[root_1]) != sum(matrix_2[root_2]):
             return False
         if sum(matrix_1[root_1]) == 0:
+            relation_dict[root_1] = root_2
             return True
         to_nodes_1 = [index for index, value in enumerate(matrix_1[root_1]) if value == 1]
-        to_nodes_2 = [index for index, value in enumerate(matrix_2[root_2]) if value == 2]
+        to_nodes_2 = [index for index, value in enumerate(matrix_2[root_2]) if value == 1]
 
         for to_node_1 in to_nodes_1:
             for to_node_2 in to_nodes_2:
-                if self._equal_structure(matrix_1, matrix_2, to_node_1, to_node_2):
-                    # Found node in network 2 corresponding to node in network 1
+                if self._equal_structure(matrix_1, matrix_2, to_node_1, to_node_2, relation_dict):
                     break
             else:
-                # Dit not find node in network 2 corresponding to node in network 1
                 return False
-            # to node 2 already used, can not use again
             to_nodes_2.remove(to_node_2)
         return True
 
@@ -1295,3 +1193,288 @@ class RootedLevelKNetwork:
         self.__dict__ = d
         self.logger = logging.getLogger(self.logger)
         return self.__dict__
+
+
+class TrinetInfo:
+    def __init__(self, trinet, info: dict = None):
+        self.trinet = trinet
+        self.info = coalesce(info, dict())
+
+    def shrink(self, leaf_set):
+        can_shrink = self.trinet.shrink(leaf_set)
+        return bool(can_shrink)
+
+    def calculate_info(self):
+        self.info['cut_arc_sets'] = self.trinet.cut_arc_sets()
+
+    def add_info(self, trinet_info):
+        for key, value in trinet_info.info.items():
+            self.info[key] = value
+
+    @classmethod
+    def limit_to(cls, trinet_info, leaf_names):
+        trinet = RootedLevelKNetwork.from_network(trinet_info.trinet, leaf_names, suppress_parallel=True, suppress_redundant='all')
+        result = cls(trinet)
+        return result
+
+    def __getitem__(self, item):
+        return self.info[item]
+
+    def __setitem__(self, item, value):
+        self.info[item] = value
+
+    def __copy__(self):
+        cls = self.__class__
+        cp = cls.__new__(cls)
+        cp.trinet = copy.copy(self.trinet)
+        cp.info = copy.copy(self.info)
+        return cp
+
+    def __deepcopy__(self, memo):
+        cls = self.__class__
+        cp = cls.__new__(cls)
+        cp.trinet = copy.deepcopy(self.trinet)
+        cp.info = copy.deepcopy(self.info)
+        return cp
+
+    def __str__(self):
+        return str(self.trinet.leaf_names) + "\n" + pp.pformat(self.info)
+
+
+class TrinetInfoList(list):
+    def __init__(self):
+        super().__init__()
+
+    def calculate_info(self):
+        for trinet_info in self:
+            trinet_info.calculate_info()
+
+    def add_info(self, trinet_info_list):
+        for trinet_info in self:
+            equal_structured_trinets, relation_dicts = trinet_info_list.find_equal_structured_trinet(trinet_info.trinet)
+            equal_structured_trinets, relation_dicts = trinet_info_list.find_equal_structured_trinet(trinet_info.trinet)
+            try:
+                equal_structured_trinet = equal_structured_trinets[0]
+                trinet_info.add_info(equal_structured_trinet)
+                trinet_info['relation_dict'] = relation_dicts[0]
+                trinet_info['leaf_order'] = trinet_info.trinet.get_leaf_ordering()
+            except IndexError:
+                pass
+
+    def shrink(self, leaf_set):
+        to_remove = []
+        for trinet_info in iter(self):
+            if not trinet_info.shrink(leaf_set):
+                to_remove.append(trinet_info)
+        for trinet_info in to_remove:
+            self.remove(trinet_info)
+        # TODO, remove duplicates?
+
+    def append(self, other):
+        assert type(other) == TrinetInfo, "Can only add object of type TrinetInfo to a TrinetInfoList"
+        super().append(other)
+
+    def find_equal_structured_trinet(self, trinet):
+        result = TrinetInfoList()
+        relation_dicts = []
+        for trinet_info in iter(self):
+            relation_dict = trinet_info.trinet.equal_structure(trinet)
+            if len(relation_dict) > 0:
+                result.append(trinet_info)
+                relation_dicts.append(relation_dict)
+        return result, relation_dicts
+
+    def find_equal_trinet(self, trinet):
+        for trinet_info in iter(self):
+            if trinet_info.trinet == trinet:
+                return trinet_info
+        return False
+
+    def find_equal_leaf_names_trinet(self, trinet):
+        return self.find_trinet_by_leaf_names(trinet.leaf_names)
+
+    def find_trinet_by_leaf_names(self, leaf_names):
+        result = TrinetInfoList()
+        for trinet_info in iter(self):
+            if set(trinet_info.trinet.leaf_names) == set(leaf_names):
+                result.append(trinet_info)
+        return result
+
+    def contains_trinet_with_leaf_names(self, leaf_names):
+        for trinet_info in iter(self):
+            if set(trinet_info.trinet.leaf_names) == set(leaf_names):
+                return True
+        return False
+
+    def remove_trinet_by_leaf_names(self, leaf_names):
+        trinet_infos = self.find_trinet_by_leaf_names(leaf_names)
+        for trinet_info in trinet_infos:
+            self.remove(trinet_info)
+        return trinet_infos
+
+    def find_trinets_with_leaf_names_in(self, leaf_names):
+        # assert len(leaf_names) >= 2, "Leaf_names should always include at least two leaves"
+        result = TrinetInfoList()
+        if len(leaf_names) > 2:
+            for trinet_info in iter(self):
+                if set(trinet_info.trinet.leaf_names).issubset(leaf_names):
+                    result.append(trinet_info)
+        else:
+            for trinet_info in iter(self):
+                if set(leaf_names).issubset(trinet_info.trinet.leaf_names):
+                    result.append(TrinetInfo.limit_to(trinet_info, leaf_names))
+        return result
+
+    def trinets_where(self, category, value):
+        result = TrinetInfoList()
+        for trinet_info in iter(self):
+            if trinet_info[category] == value:
+                result.append(trinet_info)
+        return result
+
+    def trinets_with_category(self, category):
+        result = TrinetInfoList()
+        for trinet_info in self:
+            if category in trinet_info.info.keys():
+                result.append(trinet_info)
+        return result
+
+    def represented_leaves(self):
+        result = set()
+        for trinet_info in self:
+            result.update(trinet_info.trinet.leaf_names)
+        return result
+
+    def get_minimal_sink_sets(self, level=0):
+        leaf_set = self.represented_leaves()
+        arc_count_dict = dict()
+        for trinet_info in self:
+            cut_arc_sets = trinet_info['cut_arc_sets']
+            for cut_arc_set in cut_arc_sets:
+                if len(cut_arc_set) == 2:
+                    x = cut_arc_set[0]
+                    y = cut_arc_set[1]
+                    z = [Z for Z in trinet_info.trinet.leaf_names if Z not in cut_arc_set][0]
+                    for i in (x, y):
+                        try:
+                            arc_count_dict[(i, z)] += 1
+                        except KeyError:
+                            arc_count_dict[(i, z)] = 1
+
+        adjacency_dict = dict()
+        arc_iterator = itertools.permutations(leaf_set, 2)
+        for arc in arc_iterator:
+            try:
+                count = arc_count_dict[arc]
+            except KeyError:
+                count = 0
+            if count <= level:
+                try:
+                    adjacency_dict[arc[0]].add(arc[1])
+                except KeyError:
+                    adjacency_dict[arc[0]] = {arc[1]}
+
+        strongly_connected_components = tarjan(adjacency_dict)
+        msss = []
+        for strongly_connected_component in strongly_connected_components:
+            for node in strongly_connected_component:
+                to_leaves = adjacency_dict[node]
+                if not set(to_leaves).issubset(strongly_connected_component):
+                    break
+            else:
+                msss.append(strongly_connected_component)
+
+        return [mss for mss in msss if len(mss) > 1]  # and len(mss) != len(leaf_set)
+
+    def max_level(self):
+        level = 0
+        for trinet_info in self:
+            level = max(level, trinet_info['level'])
+        return level
+
+    def best_generator(self):
+        generators = []
+        generator_count = []
+        for trinet_info in self:
+            try:
+                generator_index = generators.index(trinet_info['generator'])
+                generator_count[generator_index] += 1
+            except ValueError:
+                generators.append(trinet_info['generator'])
+                generator_count.append(1)
+
+        max_index = generator_count.index(max(generator_count))
+        generator = generators[max_index]
+        return copy.deepcopy(generator)
+
+    def leaf_locations(self):
+        leaf_set = copy.deepcopy(self.represented_leaves())
+
+        # Create: Leaf --> Edge --> (how many times leaf is on this edge)
+        leaf_on_edge_count_dict = {leaf: {} for leaf in leaf_set}
+        relation_dict_count = {leaf: {'A': 0, 'B': 0, 'C': 0} for leaf in leaf_set}
+        for trinet_info in self:
+            relation_dict = trinet_info['relation_dict']
+            for key, value in relation_dict.items():
+                relation_dict_count[value][key] += 1
+
+            for leaf, edge in trinet_info['extra_leaf_dict'].items():
+                translated_leaf = relation_dict[leaf]
+                try:
+                    leaf_on_edge_count_dict[translated_leaf][edge] += 1
+                except KeyError:
+                    leaf_on_edge_count_dict[translated_leaf][edge] = 1
+
+        # Create: Edge --> (leaves which are on this edge)
+        edge_leaf_dict = dict()
+        for leaf, edge_count_dict in leaf_on_edge_count_dict.items():
+            try:
+                max_count = max(edge_count_dict.values())
+            except ValueError:
+                continue
+            best_edges = [edge for edge, count in edge_count_dict.items() if count == max_count]
+            best_edge = best_edges[0]
+
+            try:
+                edge_leaf_dict[best_edge].add(leaf)
+            except KeyError:
+                edge_leaf_dict[best_edge] = set(leaf)
+            leaf_set.remove(leaf)
+            relation_dict_count.pop(leaf)
+
+        # Find which retitulation is which
+        reticulation_relation_dict = {reticulation: set() for reticulation in relation_dict_count}
+        for reticulation, counts in relation_dict_count.items():
+            m = max(counts.values())
+            for option, count in counts.items():
+                if count == m:
+                    reticulation_relation_dict[reticulation].add(option)
+
+        # TODO: Make sure that not the same option is chosen for different reticulations
+        reticulation_relation_dict = {reticulation: options.pop() for reticulation, options in reticulation_relation_dict.items()}
+
+        return edge_leaf_dict, reticulation_relation_dict
+
+    def leaf_order_info(self):
+        leaf_set = bidict({leaf: index for leaf, index in enumerate(self.represented_leaves())})
+        leaf_order_matrix = np.zeros((len(leaf_set), len(leaf_set)))
+        for trinet_info in self:
+            relation_dict = trinet_info['relation_dict']
+
+            leaf_order = trinet_info['leaf_order']
+            for leaf_ord in leaf_order:
+                for low_leaf_index in range(len(leaf_ord)):
+                    for high_leaf_index in range(low_leaf_index + 1, len(leaf_ord)):
+                        low_leaf = leaf_set.inverse[leaf_ord[low_leaf_index]]
+                        high_leaf = leaf_set.inverse[leaf_ord[high_leaf_index]]
+                        leaf_order_matrix[low_leaf, high_leaf] += 1
+        return leaf_set, leaf_order_matrix
+
+    def order_leaves(self, edge_leaf_dict, generator):
+        symmetrical_nodes = generator.symmetrical_nodes
+
+    def __add__(self, other):
+        result = copy.deepcopy(self)
+        for oth in other:
+            result.append(oth)
+        return result

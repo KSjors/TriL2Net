@@ -7,23 +7,23 @@ Created on Tue Feb 26 14:11:45 2019
 
 import logging
 from utils.help_functions import guid, leaf_names_to_identifier, mss_leaf_name
-from datastructures.rooted_level_k_network import *
-from datastructures.rooted_level_k_generator import *
+from datastructures.rooted_level_k_network import  RootedLevelKNetwork, TrinetInfoList, TrinetInfo
+from datastructures.rooted_level_k_generator import RootedLevelKGenerator
 from data.all_trinets import get_trinets
 from graphviz import Digraph
 import pprint
 import itertools
 
-all_generators, trinet_lookup_dict = get_trinets()
+all_generators, standard_trinet_info_list = get_trinets()
 
 pp = pprint.PrettyPrinter(indent=4)
 
 
 class TrinetSet:
-    def __init__(self, trinet_dict: dict, taxa_names: bidict):
+    def __init__(self, trinet_info_list: TrinetInfoList, taxa_names: bidict):
         self.uid = guid()
         self.logger = logging.getLogger("Created trinet set {}".format(self.uid))
-        self.trinet_dict = trinet_dict
+        self.trinet_info_list = trinet_info_list
         self.taxa_names = taxa_names
         self.number_of_taxa = len(taxa_names)
 
@@ -38,46 +38,46 @@ class TrinetSet:
         return trinet_set_copy
 
     @classmethod
-    def from_trinet_list(cls, trinet_list: list):
+    def from_trinet_info_list(cls, trinet_info_list: TrinetInfoList):
         logging.debug("Creating trinet set from triplet trinet list.")
-        trinet_dict = {}
+        trinet_info_list = TrinetInfoList()
         taxa_names = bidict()
-        trinet_set = cls(trinet_dict, taxa_names)
-        for trinet in trinet_list:
-            trinet_set.add_trinet(trinet)
+        trinet_set = cls(trinet_info_list, taxa_names)
+        for trinet_info in trinet_info_list:
+            trinet_set.add_trinet(trinet_info)
 
         trinet_set.logger.debug("Created from triplet trinet list.")
         return trinet_set
 
-    def add_trinet(self, trinet: RootedLevelKNetwork):
+    def add_trinet(self, trinet_info: TrinetInfo):
         """Add trinet to dictionary."""
+        trinet = trinet_info.trinet
         triplet = trinet.leaf_names
         self.logger.debug("Adding trinet {} with leaves {}.".format(trinet.uid, triplet))
         assert len(triplet) == 3, "Can not add trinet {} to trinet_set {} as it does not have exactly three leaves.".format(trinet.uid, self.uid)
-        assert tuple(triplet) not in self.trinet_dict, "Can not add trinet {} to trinet_set {} as it already exists.".format(trinet.uid, self.uid)
-        trinet_identifier = leaf_names_to_identifier(triplet)
-        self.trinet_dict[trinet_identifier] = trinet
+        assert self.trinet_info_list.contains_trinet_with_leaf_names(tuple), "Can not add trinet {} to trinet_set {} as it already exists.".format(trinet.uid, self.uid)
+        self.trinet_info_list.append(trinet_info)
         for X in triplet:
             if X not in self.taxa_names.keys():
                 self.taxa_names[X] = self.number_of_taxa
                 self.number_of_taxa += 1
-        return trinet_identifier
+        return trinet_info
 
     def remove_trinet(self, triplet: list):
         """Remove trinet with taxa = triplet from dictionary."""
         self.logger.debug("Removing triplet {}.".format(triplet))
         assert len(triplet) == 3, "Can not remove {} as it is not a triplet.".format(triplet)
-        trinet_identifier = leaf_names_to_identifier(triplet)
-        trinet = self.trinet_dict[trinet_identifier]
+        trinet_info = self.trinet_info_list.remove_trinet_by_leaf_names(triplet)
+        trinet = trinet_info.trinet
         self.logger.debug("Triplet {} corresponds to trinet {}.".format(triplet, trinet.uid))
-        return self.trinet_dict.pop(trinet_identifier)
+        return trinet_info
 
     def cut_arc_sets_per_triplet(self) -> dict:
         """Calculate cut-arc sets of each trinet."""
         self.logger.debug("Calculating cut-arc sets per trinet.")
         cut_arc_sets = {}
-        for trinet_identifier in self.trinet_dict:
-            cut_arc_sets[trinet_identifier] = self.trinet_dict[trinet_identifier].cut_arc_sets()
+        for trinet in self.trinet_info_list:
+            cut_arc_sets[trinet.leaf_names] = trinet.get_cut_arc_sets()
         return cut_arc_sets
 
     def suppress_minimal_sink_set(self, mss: list) -> str:
@@ -89,9 +89,8 @@ class TrinetSet:
         if len(mss) > 2:
             triplet_iterator = itertools.combinations(mss, 3)
             for triplet in triplet_iterator:
-                trinet_identifier = leaf_names_to_identifier(list(triplet))
                 try:
-                    self.trinet_dict.pop(trinet_identifier)
+                    self.trinet_info_list.remove_trinet_by_leaf_names(triplet)
                 except KeyError:
                     pass
 
@@ -100,8 +99,7 @@ class TrinetSet:
             third_leaf_iterator = itertools.combinations(set(current_taxa_names) - set(mss), 1)
             for third_leaf in third_leaf_iterator:
                 triplet = list(binet) + list(third_leaf)
-                trinet_identifier = leaf_names_to_identifier(triplet)
-                self.trinet_dict.pop(trinet_identifier)
+                self.trinet_info_list.remove_trinet_by_leaf_names(triplet)
 
         # Replace name of each leaf in mss with combined name
         new_name = mss_leaf_name(mss)
@@ -109,13 +107,9 @@ class TrinetSet:
             binet_iterator = itertools.combinations(set(current_taxa_names) - set(mss), 2)
             for binet in binet_iterator:
                 leaves = list(binet) + list([leaf])
-                trinet_identifier = leaf_names_to_identifier(leaves)
-                trinet_network = self.trinet_dict.pop(trinet_identifier)
+                trinet_network = self.trinet_info_list.remove_trinet_by_leaf_names(leaves)
                 trinet_network.rename_node(leaf, new_name)
-                trinet_network.to_standard_form()
-                new_leaves = list(binet) + [new_name]
-                trinet_identifier = leaf_names_to_identifier(new_leaves)
-                self.trinet_dict[trinet_identifier] = trinet_network
+                self.trinet_info_list.append(trinet_network)
 
         for leaf in mss:
             self.remove_leaf_name(leaf)
@@ -156,18 +150,13 @@ class TrinetSet:
 
 
 class MssTrinetSet(TrinetSet):
-    def __init__(self, trinet_dict: dict, taxa_names: bidict):
-        super().__init__(trinet_dict, taxa_names)
+    def __init__(self, trinet_info_list: TrinetInfoList, taxa_names: bidict):
+        super().__init__(trinet_info_list, taxa_names)
 
-        self.mss_info = {}
-        for level, generator_list in all_generators.items():
-            self.mss_info[level] = {}
-            for gen in generator_list:
-                self.mss_info[level][gen] = {}
-        for trinet_taxa, trinet in self.trinet_dict.items():
+        for trinet_info in self.trinet_info_list:
             # Find out what the trinet structure of the trinet is
-            trinet_info = trinet_lookup_dict[trinet]
-            self.mss_info[trinet_info['generator'].level][trinet_info['generator']][tuple(trinet.leaf_names)] = trinet_info['on_edges']
+            equal_structured_trinet = standard_trinet_info_list.find_equal_structured_trinet(trinet_info)
+            trinet_info.add_info(equal_structured_trinet)
 
         self.inconsistent_trinet_dict = dict()
         self.missing_trinets = []
@@ -180,37 +169,34 @@ class MssTrinetSet(TrinetSet):
 
     @classmethod
     def from_trinet_set(cls, trinet_set: TrinetSet, mss: list):
-        result = cls({}, bidict())
+        result = cls(TrinetInfoList(), bidict())
 
+        result.logger.info(f"MSS is {mss}")
         triplet_iterator = itertools.combinations(mss, 3)
         for triplet in triplet_iterator:
             try:
-                trinet_identifier = leaf_names_to_identifier(list(triplet))
-                result.add_trinet(trinet_set.trinet_dict[trinet_identifier])
+                trinet_info = trinet_set.trinet_info_list.find_trinet_by_leaf_names(triplet)
+                result.add_trinet(trinet_info)
             except KeyError:
                 result.missing_trinets.append(triplet)
-                print(triplet)
-                kkk
 
-        result.logger.info(f"MSS info contains trinets {result.mss_info}")
         return result
 
     def add_trinet(self, trinet: RootedLevelKNetwork):
-        super().add_trinet(trinet)
-        trinet_info = trinet_lookup_dict[trinet]
-        self.mss_info[trinet_info['generator'].level][trinet_info['generator']][tuple(trinet.leaf_names)] = trinet_info['on_edges']
-        self.logger.info(f"Added trinet with leaves {trinet.leaf_names} to mss_info.")
+        trinet_info = super().add_trinet(trinet)
+        equal_structured_trinet = standard_trinet_info_list.find_equal_structured_trinet(trinet)
+        trinet_info.add_info(equal_structured_trinet)
+        self.logger.info(f"Added trinet with leaves {trinet.leaf_names}.")
 
     def set_underlying_generator_level(self, method=max):
         self.logger.info("Computing underlying generator level")
         # Group the trinet structures
         generator_level_count = {}
-        for level, generator_dict in self.mss_info.items():
-            for generator, leaf_name_on_edge_dict in generator_dict.items():
-                try:
-                    generator_level_count[level] += len(leaf_name_on_edge_dict.keys())
-                except KeyError:
-                    generator_level_count[level] = len(leaf_name_on_edge_dict.keys())
+        for trinet_info in self.trinet_info_list:
+            try:
+                generator_level_count[trinet_info['level']] += 1
+            except KeyError:
+                generator_level_count[trinet_info['level']] = 1
 
         # Take maximum found generator level
         found_levels = [level for level, count in generator_level_count.items() if count > 0]
@@ -250,7 +236,6 @@ class MssTrinetSet(TrinetSet):
         self.logger.info("Computing edge-leaf dict and reticulation list")
         if self.underlying_generator is None:
             self.set_underlying_generator()
-        print(self.underlying_generator_level)
         number_of_added_leaves = len(next(iter(self.mss_info[self.underlying_generator_level][self.underlying_generator].values())))
 
         # Dictionary stating on which edges a leaf is found
@@ -266,7 +251,6 @@ class MssTrinetSet(TrinetSet):
                 except KeyError:
                     leaf_on_edge_dict[leaf][edge] = 1
 
-        pp.pprint(leaf_on_edge_dict)
         # For each leaf take the edge which occurs the most often. If there are no edges it occurs on then it is a reticulation
         actual_leaf_on_edge_dict = {}
         for leaf, on_edges in leaf_on_edge_dict.items():
@@ -305,7 +289,6 @@ class MssTrinetSet(TrinetSet):
 
                         trinet_identifier = leaf_names_to_identifier(leaf_names)
                         trinet = self.trinet_dict[trinet_identifier]
-                        print(trinet, on_edges)
 
                         # leaf_orderings = trinet.get_leaf_ordering()
                         # for leaf_ordering in leaf_orderings:
@@ -328,7 +311,7 @@ class MssTrinetSet(TrinetSet):
                 trinet = self.trinet_dict[trinet_identifier]
                 level = len(trinet.get_reticulations())
 
-                cut_arc_set = [cut_arc_set for cut_arc_set in trinet.cut_arc_sets() if len(cut_arc_set) == 2]
+                cut_arc_set = [cut_arc_set for cut_arc_set in trinet.get_cut_arc_sets() if len(cut_arc_set) == 2]
                 leaf_names = trinet.leaf_names
                 leaf_names.remove(reticulation)
                 if len(cut_arc_set) == 1:
@@ -389,7 +372,7 @@ class MssTrinetSet(TrinetSet):
         self.logger.info("Computing underlying network.")
         if self.underlying_generator is None:
             self.set_underlying_generator()
-        network = RootedLevelKNetwork.copy_network(network=self.underlying_generator)
+        network = copy.deepcopy(self.underlying_generator)
         if len(self.on_edge_leaf_dict) + len(self.reticulations) == 0:
             self.set_on_edge_leaf_dict_and_reticulation_set()
 
@@ -404,6 +387,6 @@ class MssTrinetSet(TrinetSet):
         for edge, leaves in self.on_edge_leaf_dict.items():
             parent = edge[0]
             for leaf in leaves:
-                extra_internal_node, _ = network.add_leaf_to_edge(parent, edge[1], leaf)
+                extra_internal_node, _ = network.add_leaf_to_edge([parent, edge[1]], leaf)
                 parent = extra_internal_node
         return network

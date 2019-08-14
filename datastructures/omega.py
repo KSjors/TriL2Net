@@ -1,15 +1,14 @@
 import numpy as np
 from tarjan import tarjan
 from graphviz import Digraph
-from utils.help_functions import *
+# from utils.help_functions import *
 import logging
 
 
 class Omega:
-    def __init__(self, trinet_set):
+    def __init__(self, trinet_info_list):
         self.uid = guid()
         self.logger = logging.getLogger("omega.{}".format(self.uid))
-        self.logger.debug("Creating new omega object from trinet_set {}.".format(trinet_set.uid))
         self.adj_matrix = np.zeros((trinet_set.number_of_taxa,  trinet_set.number_of_taxa))
         self.taxa_names = trinet_set.taxa_names
         cut_arc_sets_per_triplet = trinet_set.cut_arc_sets_per_triplet()
@@ -34,7 +33,6 @@ class Omega:
 
         tj = tarjan(adj_dict)
         return list_of_list_to_name(tj, self.taxa_names.inverse)
-#        return adj_dict
 
     def visualize(self, level=0):
         self.logger.debug("Visualizing level {}.".format(level))

@@ -1,5 +1,12 @@
 import logging
 
+# TODO
+#  ENEWICK
+#  Isomorphim checking
+#  Pruning --> biconnected components only once
+
+
+
 logging_level = logging.INFO
 # set up logging to file - see previous section for more details
 logging.basicConfig(level=logging_level,
@@ -24,51 +31,81 @@ logging.getLogger('network').addHandler(fh)
 
 import os
 import data.test_networks as test_networks
-from datastructures.rooted_level_k_network import *
-from datastructures.trinet_set import *
-from solver import *
+from datastructures.rooted_level_k_network import RootedLevelKNetwork
+from solver import Solver
 import data.generators as generator
-from data.all_trinets import *
+from data.all_trinets import get_trinets, regenerate_trinets, pickle_save, pickle_read
 from utils.help_functions import *
+import timeit
+
 
 rebuild = {
-    'generators': 1
-    , 'network':  1
-    , 'trinets':  1
+    'generators': 0
+    , 'network' : 1
+    , 'trinets' : 0
 }
 
 os.environ["PATH"] += os.pathsep + 'C:/Program Files (x86)/Graphviz2.38/bin/'
-filename_save_trinets_B = 'data/trinets_B'
+filename_save_trinets_B = 'data/trinets'
 
 """ Build or load trinets """
 if rebuild['generators']:
     regenerate_trinets()
-all_generators, trinet_lookup_dict = get_trinets()
-
-# for trinet, dct in trinet_lookup_dict.items():
-#     if dct['generator'].level == 1:
-#         trinet.visualize()
-#         print(dct)
+_, standard_trinet_info_list = get_trinets()
 
 """ Build or load network """
 if rebuild['network']:
-    dct = test_networks.connections_big
-    network = RootedLevelKNetwork.from_connections_dict(dct)
-    pickle_save("data/network_B.pickle", network)
-network = pickle_read("data/network_B.pickle")
+    dct = test_networks.connections_0
+    main_network = RootedLevelKNetwork.from_connections_dict(dct)
+
+    dct_1 = test_networks.connections_1
+    network_1 = RootedLevelKNetwork.from_connections_dict(dct_1)
+
+    dct_2a = test_networks.connections_2a
+    network_2a = RootedLevelKNetwork.from_connections_dict(dct_2a)
+
+    dct_2b = test_networks.connections_2b
+    network_2b = RootedLevelKNetwork.from_connections_dict(dct_2b)
+
+    dct_2c = test_networks.connections_2c
+    network_2c = RootedLevelKNetwork.from_connections_dict(dct_2c)
+
+    dct_2d = test_networks.connections_2d
+    network_2d = RootedLevelKNetwork.from_connections_dict(dct_2d)
+
+    main_network.replace_leaf_with_network('D1', network_1)
+    main_network.standardize_internal_node_names()
+    # main_network.replace_leaf_with_network('D2', network_2a)
+    # main_network.standardize_internal_node_names()
+    # main_network.replace_leaf_with_network('D3', network_2b)
+    # main_network.standardize_internal_node_names()
+    # main_network.replace_leaf_with_network('D4', network_2c)
+    # main_network.standardize_internal_node_names()
+    # main_network.replace_leaf_with_network('D5', network_2d)
+    # main_network.standardize_internal_node_names()
+
+    pickle_save("data/network.pickle", main_network)
+main_network = pickle_read("data/network.pickle")
+main_network.visualize()
+
 
 """ Build or load trinets """
 if rebuild['trinets'] or rebuild['network']:
-    trinets = network.get_exhibited_trinets()
-    pickle_save('data/trinets_B', trinets)
-trinets = pickle_read('data/trinets_B')
-
-""" Build or load trinet set """
-trinet_set = TrinetSet.from_trinet_list(trinets)
-# trinet_set.remove_trinet(["J", 'H', 'G'])
+    trinet_info_list = main_network.get_exhibited_trinets()
+    pickle_save('data/trinets', trinet_info_list)
+trinet_info_list = pickle_read('data/trinets')
 
 """ Solver """
-solver = Solver(trinet_set)
+solver = Solver(trinet_info_list)
+
+solver.solve()
+
 
 """ Play around """
+# network_solved = solver.solve()
+# print(network.stable_ancestors(['C', 'D']))
+
+# trinet.visualize()
+# print(network.equal_structure(network_solved))
+
 

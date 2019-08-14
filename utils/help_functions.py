@@ -5,6 +5,7 @@ import time
 import random
 import socket
 import hashlib
+import numpy as np
 from bidict import bidict
 
 
@@ -71,10 +72,37 @@ def guid():
     return uid
 
 
-def leaf_names_to_identifier(leaf_names: list) -> str:
+def leaf_names_to_identifier(leaf_names: list) -> tuple:
     alphabetical_leaf_names = sorted(copy.copy(leaf_names))
     return tuple(alphabetical_leaf_names)
 
 
 def mss_leaf_name(mss):
     return '(' + "".join(sorted(mss)) + ')'
+
+
+def coalesce(value, default=None):
+    return value if value is not None else default
+
+
+def determine_ranking(score_matrix, ranking=None):
+    score_matrix = copy.copy(score_matrix)
+    if ranking is None:
+        ranking = []
+    if sum(sum(score_matrix)) == 0:
+        all_players = list(range(len(score_matrix)))
+        for player in ranking:
+            all_players.remove(player)
+        return ranking + all_players
+    player_wins = sum(score_matrix.T)
+    best_players = np.where(player_wins == player_wins.max())[0]
+    if len(best_players) == 1 or len(best_players) == len(score_matrix) - len(ranking):
+        # TODO all same ranking in one go?
+        best_player = best_players[0]
+    else:
+        intermediate_ranking = determine_ranking(score_matrix[best_players][:, best_players])
+        best_player = best_players[intermediate_ranking[0]]
+    score_matrix[best_player, :] = 0
+    score_matrix[:, best_player] = 0
+    ranking.append(best_player)
+    return determine_ranking(score_matrix, ranking)

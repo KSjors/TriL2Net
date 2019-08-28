@@ -1,11 +1,8 @@
 import logging
 
 # TODO
-#  ENEWICK
-#  Isomorphim checking
-#  Pruning --> biconnected components only once
-
-
+#  Isomorphism checking
+#  Random level-k network generation
 
 logging_level = logging.INFO
 # set up logging to file - see previous section for more details
@@ -41,7 +38,7 @@ import timeit
 
 rebuild = {
     'generators': 0
-    , 'network' : 1
+    , 'network' : 0
     , 'trinets' : 0
 }
 
@@ -57,19 +54,14 @@ _, standard_trinet_info_list = get_trinets()
 if rebuild['network']:
     dct = test_networks.connections_0
     main_network = RootedLevelKNetwork.from_connections_dict(dct)
-
     dct_1 = test_networks.connections_1
     network_1 = RootedLevelKNetwork.from_connections_dict(dct_1)
-
     dct_2a = test_networks.connections_2a
     network_2a = RootedLevelKNetwork.from_connections_dict(dct_2a)
-
     dct_2b = test_networks.connections_2b
     network_2b = RootedLevelKNetwork.from_connections_dict(dct_2b)
-
     dct_2c = test_networks.connections_2c
     network_2c = RootedLevelKNetwork.from_connections_dict(dct_2c)
-
     dct_2d = test_networks.connections_2d
     network_2d = RootedLevelKNetwork.from_connections_dict(dct_2d)
 
@@ -88,18 +80,21 @@ if rebuild['network']:
 main_network = pickle_read("data/network.pickle")
 main_network.visualize()
 
-
 """ Build or load trinets """
 if rebuild['trinets'] or rebuild['network']:
     trinet_info_list = main_network.get_exhibited_trinets()
     pickle_save('data/trinets', trinet_info_list)
 trinet_info_list = pickle_read('data/trinets')
 
-""" Solver """
-solver = Solver(trinet_info_list)
+# """ Solver """
+# solver = Solver(trinet_info_list)
+#
+# solver.solve()
 
-solver.solve()
 
+a = '((1, ((2, (3, (4)Y#H1)g)e, (((Y#H1, 5)h, 6)f)X#H2)c)a, ((X#H2, 7)d, 8)b)r'
+network = RootedLevelKNetwork.from_enewick(a)
+network.visualize()
 
 """ Play around """
 # network_solved = solver.solve()

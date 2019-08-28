@@ -18,6 +18,7 @@ from tarjan import tarjan
 import time
 import os
 import pprint
+import random
 
 pp = pprint.PrettyPrinter(indent=4)
 
@@ -25,7 +26,7 @@ os.environ["PATH"] += os.pathsep + 'C:/Program Files (x86)/Graphviz2.38/bin/'
 
 
 class RootedLevelKNetwork:
-    def __init__(self, adj_matrix: np.ndarray, node_name_map: bidict, leaf_names: list, level: int, dimension: int):
+    def __init__(self, adj_matrix: np.ndarray, node_name_map: bidict, leaf_names: list = None, leaf_numbers: list = None, level: int = 2, dimension: int = 3):
         self.uid = guid()
         self.logger = logging.getLogger('network.{}'.format(self.uid))
         self.logger.debug("Creating new rooted level {} network of dimension {}.".format(level, dimension))
@@ -35,12 +36,14 @@ class RootedLevelKNetwork:
 
         self.adj_matrix = adj_matrix
         self.node_name_map = node_name_map
-        self._leaf_names = leaf_names
+
+        if leaf_numbers is not None:
+            self.leaf_numbers = leaf_numbers
+        else:
+            self.leaf_numbers = [node_name_map[leaf_name] for leaf_name in leaf_names]
 
         # Set shape numbers
-        self.number_of_leaves = len(self._leaf_names)
         self.number_of_nodes = shape[1]
-        self.number_of_internals = self.number_of_nodes - self.number_of_leaves
 
         # Set network properties
         self.level = level
@@ -58,10 +61,8 @@ class RootedLevelKNetwork:
         cp = cls.__new__(cls)
         cp.adj_matrix = copy.copy(self.adj_matrix)
         cp.node_name_map = copy.copy(self.node_name_map)
-        cp.leaf_names = copy.copy(self.leaf_names)
-        cp.number_of_leaves = copy.copy(self.number_of_leaves)
+        cp.leaf_numbers = copy.copy(self.leaf_numbers)
         cp.number_of_nodes = copy.copy(self.number_of_nodes)
-        cp.number_of_internals = copy.copy(self.number_of_internals)
         cp.level = copy.copy(self.level)
         cp.dimension = copy.copy(self.dimension)
         cp.uid = guid()
@@ -77,10 +78,8 @@ class RootedLevelKNetwork:
         cp = cls.__new__(cls)
         cp.adj_matrix = copy.deepcopy(self.adj_matrix)
         cp.node_name_map = copy.deepcopy(self.node_name_map)
-        cp.leaf_names = copy.deepcopy(self.leaf_names)
-        cp.number_of_leaves = copy.deepcopy(self.number_of_leaves)
+        cp.leaf_numbers = copy.deepcopy(self.leaf_numbers)
         cp.number_of_nodes = copy.deepcopy(self.number_of_nodes)
-        cp.number_of_internals = copy.deepcopy(self.number_of_internals)
         cp.level = copy.deepcopy(self.level)
         cp.dimension = copy.deepcopy(self.dimension)
         cp.uid = guid()
@@ -92,29 +91,42 @@ class RootedLevelKNetwork:
         return cp
 
     @classmethod
-    def trinet_from_network(cls, network, taxa: list):
+    def from_enewick(cls, string):
+        adjacency_dict = enewick(string)
+        result = cls.from_connections_dict(adjacency_dict)
+        return result
+
+    @classmethod
+    def trinet_from_network(cls, network, node_names: list = None, node_numbers: list = None):
         """Create trinet from network."""
-        logging.debug("Creating trinet from network {} using {}.".format(network.uid, taxa))
-        network.logger.debug("Creating trinet using {}.".format(taxa))
+        assert (node_numbers is not None) or (node_names is not None), "At least one of node_names and node_numbers has to be given"
+        if node_numbers is not None:
+            taxa = node_numbers
+        else:
+            taxa = network.get_node_numbers_of(node_names)
         assert len(taxa) <= 3, "Can not create trinet from network {} using as this {} are more than 3 leaves.".format(network.uid, taxa)
-        trinet = cls.from_network(network, taxa, suppress_redundant='all', suppress_parallel=True)
-        trinet.logger.debug("Trinet of network {} with taxa {}.".format(network.uid, taxa))
+        trinet = cls.from_network(network, node_numbers=taxa, suppress_redundant='all', suppress_parallel=True)
         return trinet
 
     @classmethod
-    def from_network(cls, network, taxa: list, suppress_redundant='none', suppress_parallel=False):
+    def from_network(cls, network, node_numbers: list = None, node_names: list = None, suppress_redundant='none', suppress_parallel=False):
         """Create sub-network from network."""
+        assert (node_numbers is not None) or (node_names is not None), "At least one of node_names and node_numbers has to be given"
+        if node_numbers is not None:
+            taxa = node_numbers
+        else:
+            taxa = network.get_node_numbers_of(node_names)
         logging.debug("Creating sub=network from {} using {}.".format(network.uid, taxa))
         network.logger.debug("Creating sub-network using {}.".format(taxa))
-        assert set(taxa).issubset(set(network.leaf_names)), "Can not create sub-network of network {} using {} as they are not leaves of network.".format(
+        assert set(taxa).issubset(set(network.leaf_numbers)), "Can not create sub-network of network {} using {} as they are not leaves of network.".format(
             network.uid,
             taxa)
         adj_matrix = copy.deepcopy(network.adj_matrix)
         node_name_map = copy.deepcopy(network.node_name_map)
         level = copy.copy(network.level)
         dimension = copy.copy(network.dimension)
-        new_network = cls(adj_matrix=adj_matrix, node_name_map=node_name_map, leaf_names=taxa, level=level, dimension=dimension)
-        new_network.prune(suppress_redundant=suppress_redundant, suppress_parallel=suppress_parallel)
+        new_network = cls(adj_matrix=adj_matrix, node_name_map=node_name_map, leaf_numbers=taxa, level=level, dimension=dimension)
+        new_network._prune(suppress_redundant=suppress_redundant, suppress_parallel=suppress_parallel)
         new_network.logger.debug("Sub-network of network {} with taxa {}.".format(network.uid, taxa))
         return new_network
 
@@ -123,7 +135,7 @@ class RootedLevelKNetwork:
         """Create network from directed adjacency matrix. Assumes only internal nodes have rows. Other nodes are leaves."""
         logging.debug("Creating network from directed adjacency matrix.")
         shape = dir_adj_matrix.shape
-        adj_matrix = np.zeros((shape[1], shape[1])).astype(int)
+        adj_matrix = np.zeros((shape[1], shape[1])).astype(float)
         adj_matrix[:shape[0], :shape[1]] += dir_adj_matrix
         adj_matrix[:shape[1], :shape[0]] -= dir_adj_matrix.T
         node_name_map = bidict()
@@ -144,7 +156,6 @@ class RootedLevelKNetwork:
     @classmethod
     def from_connections_dict(cls, connections_dict: dict, level=2, dimension=2):
         """Create network from connection dictionary. Assumes nodes without outgoing arcs are leaves."""
-        logging.debug("Creating network from connections dictionary.")
         node_name_map = bidict()
         leaf_names = list()
 
@@ -152,24 +163,20 @@ class RootedLevelKNetwork:
         adj_matrix = np.zeros((0, 0)).astype(int)
         network = cls(adj_matrix=adj_matrix, node_name_map=node_name_map, leaf_names=leaf_names, level=level, dimension=dimension)
 
-        network.logger.debug("Adding internal nodes to network.")
-        keys = sorted(connections_dict.keys())
-        keys.sort()
-        for key in keys:
-            network._add_internal_node_to_network(str(key))
+        for from_node_name in connections_dict.keys():
+            network._add_node_to_network(str(from_node_name))
 
-        network.logger.debug("Adding leaf nodes to network.")
-        for from_node in connections_dict.keys():
-            for to_node in connections_dict[from_node]:
-                if str(to_node) not in network.node_name_map:
-                    network._add_leaf_to_network(to_node)
+        for to_node_names in connections_dict.values():
+            for to_node_name in to_node_names:
+                if str(to_node_name) not in network.node_name_map:
+                    network._add_node_to_network(str(to_node_name), leaf=True)
 
-        network.logger.debug("Adding connections between nodes.")
-        for from_node in connections_dict.keys():
-            for to_node in connections_dict[from_node]:
-                network._add_connection(str(from_node), str(to_node))
+        for from_node_name, to_node_names in connections_dict.items():
+            from_node_number = network.get_node_number_of(str(from_node_name))
+            for to_node_name in to_node_names:
+                to_node_number = network.get_node_number_of(str(to_node_name))
+                network._add_connection(from_node_number, to_node_number)
         assert network.is_valid(), "Connection dictionary results in an invalid network."
-        network.logger.debug("Created from connections dictionary.")
         return network
 
     def is_valid(self) -> bool:
@@ -222,11 +229,6 @@ class RootedLevelKNetwork:
 
     # --------------------------------------------------------- ? --------------------------------------------------------- #
     @property
-    def leaf_numbers(self):
-        """Retrieve numbers corresponding to leaves."""
-        return self.get_node_numbers_of(self._leaf_names)
-
-    @property
     def node_names(self) -> list:
         """Retrieve list of node names ordered by their number"""
         return self.get_node_names_of(sorted(list(self.node_name_map.values())))
@@ -236,31 +238,43 @@ class RootedLevelKNetwork:
         """Retrieve list of leaf names ordered by their number"""
         return self.get_node_names_of(sorted(self.leaf_numbers))
 
-    @leaf_names.setter
-    def leaf_names(self, leaf_names: list):
-        assert set(leaf_names).issubset(self.node_name_map), "Not all leaf names are in the network."
-        self._leaf_names = list(leaf_names)
+    @property
+    def internal_node_numbers(self) -> list:
+        """Retrieve list of leaf names ordered by their number"""
+        return [node_number for node_number in self.node_name_map.values() if not self._is_leaf_node(node_number)]
+
+    @property
+    def internal_node_names(self) -> list:
+        """Retrieve list of leaf names ordered by their number"""
+        return self.get_node_names_of([node_number for node_number in self.node_name_map.values() if not self._is_leaf_node(node_number)])
+
+    @property
+    def leaf_mask(self):
+        mask = np.ones(self.number_of_nodes)
+        mask[self.leaf_numbers] = 0
+        return mask
 
     def is_connected_node(self, node_name: str) -> bool:
         """Check whether node is connected to the graph."""
-        return sum(self.adj_matrix[self.get_node_number_of(node_name), :] != 0) > 0
+        return self._is_connected_node(self.get_node_number_of(node_name))
+
+    def _is_connected_node(self, node_number: int) -> bool:
+        """Check whether node is connected to the graph."""
+        return sum(self.adj_matrix[node_number, :] != 0) > 0
 
     # --------------------------------------------------------- ALTER NETWORK METHODS --------------------------------------------------------- #
     def standardize_internal_node_names(self) -> None:
         self.logger.debug(f"Standardizing internal node names")
         # Temporary names
-        for internal_node in self.get_node_names_of(list(range(self.number_of_internals))):
-            self.rename_node(internal_node, internal_node + "^")
+        for internal_node in self.internal_node_numbers:
+            self._rename_node(internal_node, self.get_node_name_of(internal_node) + "^")
 
-        for index, internal_node in enumerate(self.get_node_names_of(list(range(self.number_of_internals)))):
-            self.rename_node(internal_node, str(index))
+        for index, internal_node in enumerate(self.internal_node_numbers):
+            self._rename_node(internal_node, str(index))
 
     def rename_node(self, old_name: str, new_name: str) -> None:
         """Replace name of node with name old_name by new_name."""
         assert new_name not in self.node_names, f"There already exists a node with node name {new_name}."
-
-        translation_dict = {node_name: node_name for node_name in self.node_name_map.keys()}
-        translation_dict[old_name] = new_name
 
         # Rename node in node_names
         node_number = self.node_name_map.pop(old_name)
@@ -268,8 +282,8 @@ class RootedLevelKNetwork:
 
         # Rename node in leaf_names if node is a leaf
         try:
-            self._leaf_names.remove(old_name)
-            self._leaf_names.append(new_name)
+            self.leaf_numbers.remove(old_name)
+            self.leaf_numbers.append(new_name)
         except ValueError:
             pass
 
@@ -277,29 +291,46 @@ class RootedLevelKNetwork:
         self.partial_ordering = None
         self.cut_arc_sets = None
 
-    def shrink(self, leaf_set):
+    def _rename_node(self, node_number: int, new_name: str) -> None:
+        assert new_name not in self.node_names, f"There already exists a node with node name {new_name}."
+
+        # Rename node in node_names
+        old_name = self.node_name_map.inverse[node_number]
+        self.node_name_map.pop(old_name)
+        self.node_name_map.put(new_name, node_number)
+
+        # Rename node in leaf_names if node is a leaf
+        try:
+            self.leaf_numbers.remove(old_name)
+            self.leaf_numbers.append(new_name)
+        except ValueError:
+            pass
+
+        self.biconnected_components = None
+        self.partial_ordering = None
+        self.cut_arc_sets = None
+
+    def shrink(self, leaf_names_set):
         """Shrink set of leaves"""
-        intersection = set(self.leaf_names).intersection(leaf_set)
+        intersection = set(self.leaf_names).intersection(leaf_names_set)
         if len(intersection) == len(self.leaf_names):
             return False
         if len(intersection) == 0:
             return True
-        leaf_to_keep = intersection.pop()
-        for leaf in intersection:
-            self._remove_leaf_status_node(leaf)
-        self.prune()
-        mss_name = mss_leaf_name(leaf_set)
-        self.rename_node(leaf_to_keep, mss_name)
+        leaf_numbers_set = set(self.get_node_numbers_of(list(intersection)))
+        mss_name = mss_leaf_name(leaf_names_set)
+        return self._shrink(leaf_numbers_set, mss_name)
 
+    def _shrink(self, leaf_numbers_set, mss_name):
+        leaf_to_keep = leaf_numbers_set.pop()
+        for leaf in leaf_numbers_set:
+            self._remove_leaf_status_node(leaf)
+        self._rename_node(leaf_to_keep, mss_name)
+        self._prune()
         return mss_name
 
-    def _add_connection(self, from_node_name: str, to_node_name: str):
+    def _add_connection(self, from_node_number: int, to_node_number: int):
         """Add connection between from_node_name and to_node_name."""
-        self.logger.debug(f"Adding connection between {from_node_name} and {to_node_name}.")
-
-        from_node_number = self.get_node_number_of(from_node_name)
-        to_node_number = self.get_node_number_of(to_node_name)
-
         self.adj_matrix[from_node_number][to_node_number] += 1
         self.adj_matrix[to_node_number][from_node_number] -= 1
 
@@ -308,13 +339,8 @@ class RootedLevelKNetwork:
         self.cut_arc_matrix = None
         self.cut_arc_sets = None
 
-    def _remove_connection(self, from_node_name: str, to_node_name: str) -> bool:
+    def _remove_connection(self, from_node_number: int, to_node_number: int):
         """Remove connection between from_node_name and to_node_name."""
-        self.logger.debug(f"Removing connection between {from_node_name} and {to_node_name}.")
-
-        from_node_number = self.get_node_number_of(from_node_name)
-        to_node_number = self.get_node_number_of(to_node_name)
-
         assert self.adj_matrix[from_node_number][to_node_number] > 0 > self.adj_matrix[to_node_number][
             from_node_number], "Cannot remove non-existent connection"
 
@@ -326,220 +352,191 @@ class RootedLevelKNetwork:
         self.cut_arc_matrix = None
         self.cut_arc_sets = None
 
-    def _remove_node_name_from_dict(self, node_name: str) -> int:
+    def _remove_node_from_dict(self, node_number: int) -> None:
         """Remove node with name node_name from node_names dictionary."""
-        # Remove node name from node_names
-        node_number = self.node_name_map.pop(node_name)
+        self.node_name_map.inverse.pop(node_number)
 
         # Decrease node number of nodes with number higher than node_name's
         for y in range(node_number + 1, self.number_of_nodes):
             self.node_name_map[self.node_name_map.inverse[y]] -= 1
+            if self._is_leaf_node(y):
+                self.leaf_numbers.remove(y)
+                self.leaf_numbers.append(y - 1)
 
-        # Remove node name from leaf_names if node is a leaf
-        try:
-            self._leaf_names.remove(node_name)
-        except ValueError:
-            pass
-
-        return int(node_number)
-
-    def _remove_node_name_from_adj_matrix(self, node_name: str):
+    def _remove_node_from_adj_matrix(self, node_number: int):
         """Remove node from adj_matrix."""
-        node_number = self.get_node_number_of(node_name)
         mask = np.ones(self.number_of_nodes, dtype=bool)
         mask[node_number] = False
         self.adj_matrix = self.adj_matrix[mask, :][:, mask]
 
-    def _remove_node_name_from_network(self, node_name: str, force: bool = False):
+    def _remove_node_from_network(self, node_number: int, force: bool = False):
         """Remove node fully from network."""
-        self.logger.debug(f"Removing node {node_name} from network.")
+        if self._is_leaf_node(node_number):
+            self._remove_leaf_status_node(node_number)
 
-        is_connected = force or self.is_connected_node(node_name)
-        assert is_connected, f"Can not remove node {node_name} as it is still connected"
-        node_is_leaf = self.is_leaf_node(node_name)
-        self._remove_node_name_from_adj_matrix(node_name)
-        self._remove_node_name_from_dict(node_name)
+        self._remove_node_from_adj_matrix(node_number)
+        self._remove_node_from_dict(node_number)
         self.number_of_nodes -= 1
-        if node_is_leaf:
-            self.number_of_leaves -= 1
-        else:
-            self.number_of_internals -= 1
 
         self.biconnected_components = None
         self.partial_ordering = None
         self.cut_arc_matrix = None
         self.cut_arc_sets = None
 
-    def _remove_component(self, component: list):
+    def _remove_component(self, component: list) -> None:
         """Remove all nodes in component."""
-        self.logger.debug(f"Removing nodes in {component} from network.")
+        for node_number in sorted(component, reverse=True):
+            self._remove_node_from_network(node_number=node_number, force=True)
 
-        for node_name in component:
-            self._remove_node_name_from_network(node_name=node_name, force=True)
-
-    def _add_internal_node_to_dict(self, node_name: str = None) -> str:
+    def _add_node_to_dict(self, node_name: str = None, leaf=False) -> (str, int):
         """Add internal node to node_names dictionary. Returns its number."""
-        self.logger.debug(f"Adding internal node {node_name} to dictionary.")
 
         # Get next number, and get a node_name if no name is given
-        new_number = self.number_of_internals
-        node_name = str(self.number_of_internals) if node_name is None else node_name
+        node_number = self.number_of_nodes
+        if leaf:
+            node_name = self.first_unused_leaf_name() if node_name is None else node_name
+        else:
+            node_name = str(node_number) if node_name is None else node_name
 
-        # Increase node number of leaves by 1, as internal node comes before leaves
-        for y in range(self.number_of_nodes - 1, new_number - 1, -1):
-            self.node_name_map[self.node_name_map.inverse[y]] += 1
-        self.node_name_map.put(node_name, new_number)
-        return node_name
+        self.node_name_map.put(node_name, node_number)
+        return node_name, node_number
 
-    def _add_internal_node_to_adj_matrix(self):
+    def _add_node_to_adj_matrix(self) -> None:
         """Add internal node to adj matrix """
-        self.logger.debug("Adding internal node to adjacency matrix.")
 
-        v1 = self.adj_matrix[:self.number_of_internals]
-        v2 = np.zeros((1, self.number_of_nodes))
-        v3 = self.adj_matrix[self.number_of_internals:]
-        self.adj_matrix = np.concatenate((v1, v2, v3), axis=0)
+        v = np.zeros((1, self.number_of_nodes))
+        self.adj_matrix = np.concatenate((self.adj_matrix, v), axis=0)
 
-        h1 = self.adj_matrix[:, :self.number_of_internals]
-        h2 = np.zeros((self.number_of_nodes + 1, 1))
-        h3 = self.adj_matrix[:, self.number_of_internals:]
-        self.adj_matrix = np.concatenate((h1, h2, h3), axis=1)
+        h = np.zeros((self.number_of_nodes + 1, 1))
+        self.adj_matrix = np.concatenate((self.adj_matrix, h), axis=1)
 
-    def _add_internal_node_to_network(self, node_name: str = None) -> str:
+    def _add_node_to_network(self, node_name: str = None, leaf: bool = False) -> (str, int):
         """Add internal node to network."""
         self.logger.debug("Adding internal node to network.")
 
-        node_name = self._add_internal_node_to_dict(node_name)
-        self.logger.debug(f"Internal node name is {node_name}.")
-        self._add_internal_node_to_adj_matrix()
+        node_name, node_number = self._add_node_to_dict(node_name, leaf=leaf)
+        self._add_node_to_adj_matrix()
 
         # Update numbers
-        self.number_of_internals += 1
+        if leaf:
+            self.leaf_numbers.append(node_number)
         self.number_of_nodes += 1
-        return node_name
+        return node_name, node_number
 
-    def _suppress_node(self, node_name: str):
+    def _suppress_node(self, node_number: int):
         """Remove node and connect its parent to its child if they both exist."""
-        self._suppress_component([node_name])
+        self._suppress_component([node_number])
 
     def _suppress_component(self, component: list):
         """Remove all nodes in component and connect its parent to its child if they both exist."""
-        self.logger.debug(f"Suppressing component {component}.")
-
-        in_nodes = self.get_in_nodes_component(component)
-        out_nodes = self.get_out_nodes_component(component)
-        assert len(out_nodes) == 0 or len(out_nodes) <= 1 and len(
-            in_nodes) <= 1, f"Can not suppress node {component} as it does not have at most one in and at most one out node"
+        in_nodes = self._get_in_nodes_component(component)
+        out_nodes = self._get_out_nodes_component(component)
         self._remove_component(component)
 
         if len(in_nodes) == 1 and len(out_nodes) == 1:
             out_node = out_nodes[0]
             in_node = in_nodes[0]
+            out_node -= sum(np.array(component) < out_node)
+            in_node -= sum(np.array(component) < in_node)
             self._add_connection(in_node, out_node)
 
-    def _remove_leaf_status_node(self, node_name: str):
+    def remove_leaf(self, leaf_name: str):
+        """Remove leaf and prune to make a proper network again"""
+        leaf_number = self.get_node_number_of(leaf_name)
+        self._remove_leaf_status_node(leaf_number)
+        self._prune()
+
+    def _remove_leaf_status_node(self, node_number: int):
         """Remove leaf with name node_name"""
-        self.logger.debug(f"Changing node {node_name} from leaf status to non-leaf status.")
-
-        assert self.is_leaf_node(node_name), f"Can not remove leaf status of node {node_name} as it is not a leaf."
-        self._leaf_names.remove(node_name)
-        self.number_of_leaves -= 1
-        self.number_of_internals += 1
-
-    def _add_leaf_to_network(self, leaf_name: str = None) -> str:
-        """Add leaf name with name leaf_name or the first available name to network."""
-        self.logger.debug(f"Adding node {leaf_name} as leaf to network.")
-
-        leaf_name = self._add_leaf_name_to_dict(leaf_name)
-        self._add_leaf_to_adj_matrix()
-
-        # Update numbers
-        self.number_of_leaves += 1
-        self.number_of_nodes += 1
-        return leaf_name
-
-    def _add_leaf_to_adj_matrix(self):
-        """Increase the size of the adj_matrix by one at the end."""
-        self.logger.debug("Increasing size of adjacency matrix by one for leaf.")
-
-        v1 = self.adj_matrix
-        v2 = np.zeros((1, self.number_of_nodes))
-        self.adj_matrix = np.concatenate((v1, v2), axis=0)
-
-        h1 = self.adj_matrix
-        h2 = np.zeros((self.number_of_nodes + 1, 1))
-        self.adj_matrix = np.concatenate((h1, h2), axis=1)
-
-    def _add_leaf_name_to_dict(self, leaf_name: str) -> str:
-        """Add leaf_name or first available name to node_names dict."""
-        self.logger.debug(f"Adding leaf {leaf_name} to dictionary.")
-
-        leaf_name = leaf_name if leaf_name else self.first_unused_leaf_name()
-        new_number = self.number_of_nodes
-        self.node_name_map.put(leaf_name, new_number)
-        self._leaf_names.append(leaf_name)
-        return leaf_name
+        self.leaf_numbers.remove(node_number)
 
     def add_leaf_to_edge(self, edge, leaf_name: str = None) -> (str, str):
         """Add node between parent and child and attach leaf with leaf_name to it."""
+        return self.get_node_names_of(list(self._add_leaf_to_edge(self.get_node_numbers_of(edge), leaf_name)))
+
+    def _add_leaf_to_edge(self, edge, leaf_name: str = None) -> (int, int):
         parent = edge[0]
         child = edge[1]
 
-        internal_name = self._add_internal_node_to_network()
-        leaf_name = self._add_leaf_to_network(leaf_name)
+        internal_name, internal_number = self._add_node_to_network()
+        leaf_name, leaf_number = self._add_node_to_network(leaf_name, leaf=True)
 
         self._remove_connection(parent, child)
 
-        self._add_connection(parent, internal_name)
-        self._add_connection(internal_name, child)
-        self._add_connection(internal_name, leaf_name)
-        return internal_name, leaf_name
+        self._add_connection(parent, internal_number)
+        self._add_connection(internal_number, child)
+        self._add_connection(internal_number, leaf_number)
+        return internal_number, leaf_number
 
-    def add_recombination_to_edges(self, edge):
-        # TODO
-        pass
+    def recombine_leaves(self, leaf_name_1: str, leaf_name_2: str) -> str:
+        assert self.is_leaf_node(leaf_name_1) and self.is_leaf_node(leaf_name_2), "Can not recombine non-leaf nodes"
+        return self.get_node_name_of(self._recombine_leaves(self.get_node_number_of(leaf_name_1), self.get_node_number_of(leaf_name_2)))
 
-    def split_leaf(self, leaf_to_split: str):
-        self.logger.debug(f"Replacing leaf {leaf_to_split} with cherry.")
+    def _recombine_leaves(self, leaf_number_1: int, leaf_number_2: int) -> int:
+        parent_number_2 = self._get_parents({leaf_number_2}, max_height=1)
+        parent_number_2.remove(leaf_number_2)
+        self._add_connection(parent_number_2.pop(), leaf_number_1)
 
-        assert self.is_leaf_node(leaf_to_split), f"Cannot replace leaf {leaf_to_split} with cherry as it is not a leaf."
-        self._remove_leaf_status_node(leaf_to_split)
-        self._add_leaf_to_network(leaf_name=leaf_to_split + "-I")
-        self._add_leaf_to_network(leaf_name=leaf_to_split + "-II")
-        self._add_connection(leaf_to_split, leaf_to_split + "-I")
-        self._add_connection(leaf_to_split, leaf_to_split + "-II")
+        leaf_name_1 = self.get_node_name_of(leaf_number_1)
+        leaf_name_2 = self.get_node_name_of(leaf_number_2)
+        recombined_leaf_name = "(" + leaf_name_1 + "x" + leaf_name_2 + ")"
+        self.rename_node(leaf_name_1, recombined_leaf_name)
+
+        self._remove_node_from_network(leaf_number_2)
+
+        return leaf_number_1 - int(leaf_number_2 < leaf_number_1)
+
+    def split_leaf(self, leaf_name_to_split: str):
+        """ Split leaf into two leaves"""
+        assert self.is_leaf_node(leaf_name_to_split), "Can not split non-leaf-node"
+        self._split_leaf(self.get_node_number_of(leaf_name_to_split))
+
+    def _split_leaf(self, leaf_number_to_split: int):
+        self._remove_leaf_status_node(leaf_number_to_split)
+        leaf_name_to_split = self.get_node_name_of(leaf_number_to_split)
+        _, left_leaf_number = self._add_node_to_network(node_name=leaf_name_to_split + "-I", leaf=True)
+        _, right_leaf_number = self._add_node_to_network(node_name=leaf_name_to_split + "-II", leaf=True)
+        self._add_connection(leaf_number_to_split, left_leaf_number)
+        self._add_connection(leaf_number_to_split, right_leaf_number)
 
     def replace_leaf_with_network(self, leaf_name_to_replace: str, replacement_network):
-        self.logger.debug(f"Replacing leaf {leaf_name_to_replace} with network {replacement_network}.")
-
         assert self.is_leaf_node(leaf_name_to_replace), f"Cannot replace leaf {leaf_name_to_replace} with network as it is not a leaf."
         assert set(self.leaf_names).isdisjoint(
             replacement_network.leaf_names), f"Cannot replace leaf {leaf_name_to_replace} with network {replacement_network} as {replacement_network} has some leafs same as {self}"
+        leaf_number_to_replace = self.get_node_number_of(leaf_name_to_replace)
+        return self._replace_leaf_with_network(leaf_number_to_replace, replacement_network)
+
+    def _replace_leaf_with_network(self, leaf_number_to_replace: int, replacement_network):
+        assert self._is_leaf_node(leaf_number_to_replace), \
+            f"Cannot replace leaf {leaf_number_to_replace} with network as it is not a leaf."
+        assert set(self.leaf_names).isdisjoint(replacement_network.leaf_names), \
+            f"Cannot replace leaf {leaf_number_to_replace} with network {replacement_network} as it has some leafs same as {self}"
+
         replacement_network = copy.deepcopy(replacement_network)
-        replacement_network_internal_nodes = set(replacement_network.node_names).difference(replacement_network.leaf_names)
-        replacement_network_root = replacement_network.get_root_name() + "*"
+        replacement_network_internal_node_names = set(replacement_network.internal_node_names)
+        replacement_network_root_name = replacement_network.get_root_name()
 
         # Add internal nodes from replacement network to current network with primed names
-        for node_name in replacement_network_internal_nodes:
-            self._add_internal_node_to_network(node_name + "*")
+        for node_name in replacement_network.internal_node_names:
+            self._add_node_to_network(node_name + "*", leaf=False)
 
         # Add leaves from replacement network to current network
         for leaf_name in replacement_network.leaf_names:
-            self._add_leaf_to_network(leaf_name)
+            self._add_node_to_network(leaf_name, leaf=True)
 
         # Replace leaf_name with root of replacement network
-        parent_of_leaf = self.get_in_nodes_node(leaf_name_to_replace)[0]
-        self._remove_node_name_from_network(leaf_name_to_replace)
-        self._add_connection(parent_of_leaf, replacement_network_root)
+        parent_of_leaf = self._get_in_nodes_node(leaf_number_to_replace)[0]
+        self._remove_node_from_network(leaf_number_to_replace)
+        self._add_connection(parent_of_leaf, self.get_node_number_of(replacement_network_root_name + "*"))
 
         # Add all connections from replacement network to current network
-        for internal_node in replacement_network_internal_nodes:
-            to_nodes = replacement_network.get_out_nodes_node(internal_node)
-            for to_node in to_nodes:
-                if to_node in replacement_network_internal_nodes:
-                    self._add_connection(internal_node + "*", to_node + "*")
-                else:
-                    self._add_connection(internal_node + "*", to_node)
+        for internal_node_name in replacement_network_internal_node_names:
+            to_node_names = replacement_network.get_out_nodes_node(internal_node_name)
+            internal_node_number = self.get_node_number_of(internal_node_name + "*")
+            for to_node_name in to_node_names:
+                if to_node_name in replacement_network_internal_node_names:
+                    to_node_name += "*"
+                self._add_connection(internal_node_number, self.get_node_number_of(to_node_name))
 
     def first_unused_leaf_name(self) -> str:
         """Find first unused leaf name in alphabetical order."""
@@ -564,6 +561,12 @@ class RootedLevelKNetwork:
         assert leaf_name is not None, "Could not find a leaf name."
         return leaf_name
 
+    def get_root_number(self) -> int:
+        """Retrieve the number of the root"""
+        col_sum = sum(self.adj_matrix > 0)
+        roots = np.where(col_sum == 0)[0]
+        return roots[0]
+
     def get_root_name(self) -> str:
         """Retrieve the name of the root."""
         self.logger.debug("Retrieving name of root node.")
@@ -581,172 +584,192 @@ class RootedLevelKNetwork:
     def get_leaves(self) -> list:
         """Retrieve node names of all leaves."""
         self.logger.debug("Retrieving names of all leaves.")
-        return self._leaf_names
+        return self.leaf_numbers
 
+    # ---------------------------------------------------------------- DEGREE METHODS ---------------------------------------------------------------- #
     def get_in_degree_node(self, node_name: str, leafless: bool = False) -> int:
         """Retrieve number of arcs entering node_name."""
-        self.logger.debug("Getting {}in degree of node {}.".format("leafless " if leafless else "", node_name))
-        node_number = self.get_node_number_of(node_name)
-        leafless_indicator = self.number_of_internals if leafless else self.number_of_nodes
-        mask = self.adj_matrix[:leafless_indicator, node_number] > 0
-        in_degree = sum(self.adj_matrix[:leafless_indicator, node_number][mask])
-        return int(in_degree)
+        return self._get_in_degree_node(self.get_node_number_of(node_name))
+
+    def _get_in_degree_node(self, node_number: int, leafless: bool = False) -> int:
+        """Retrieve number of arcs entering node_name."""
+        mask = self.leaf_mask if leafless else np.ones(self.number_of_nodes)
+        return sum(np.multiply(np.multiply(self.adj_matrix[node_number], self.adj_matrix[node_number] > 0), mask))
 
     def get_out_degree_node(self, node_name: str, leafless: bool = False) -> int:
         """Retrieve number of arcs exiting node_name."""
-        self.logger.debug("Getting {}out degree of node {}.".format("leafless " if leafless else "", node_name))
-        node_number = self.get_node_number_of(node_name)
-        leafless_indicator = self.number_of_internals if leafless else self.number_of_nodes
-        mask = self.adj_matrix[:leafless_indicator, node_number] < 0
-        out_degree = abs(sum(self.adj_matrix[:leafless_indicator, node_number][mask]))
-        return int(out_degree)
+        return self._get_out_degree_node(self.get_node_number_of(node_name))
+
+    def _get_out_degree_node(self, node_number: int, leafless: bool = False) -> int:
+        mask = self.leaf_mask if leafless else np.ones(self.number_of_nodes)
+        return sum(np.multiply(np.multiply(self.adj_matrix.T[node_number], self.adj_matrix.T[node_number] < 0), mask))
 
     def get_in_degrees(self, leafless: bool = False) -> list:
         """Retrieve number of arcs entering each node."""
-        self.logger.debug("Getting {}in degree of all node.".format("leafless " if leafless else ""))
-        leafless_indicator = self.number_of_internals if leafless else self.number_of_nodes
-        mask = self.adj_matrix[:leafless_indicator, :leafless_indicator] > 0
-        in_degree = sum(self.adj_matrix[:leafless_indicator, :leafless_indicator] * mask)
+        mask = self.leaf_mask if leafless else np.ones(self.number_of_nodes)
+        in_degree = np.sum(np.multiply(np.multiply(self.adj_matrix, self.adj_matrix > 0), mask), axis=0)
         try:
             return list(in_degree)
         except TypeError:
             return [in_degree]
 
     def get_out_degrees(self, leafless: bool = False) -> list:
-        """Retrieve number of arcs entering each node."""
-        self.logger.debug("Getting {}out degree of all nodes.".format("leafless " if leafless else ""))
-        leafless_indicator = self.number_of_internals if leafless else self.number_of_nodes
-        mask = self.adj_matrix[:leafless_indicator, :leafless_indicator] < 0
-        out_degree = -sum(self.adj_matrix[:leafless_indicator, :leafless_indicator] * mask)
+        """Retrieve number of arcs exiting each node."""
+        mask = self.leaf_mask if leafless else np.ones(self.number_of_nodes)
+        out_degree = abs(np.sum(np.multiply(np.multiply(self.adj_matrix.T, self.adj_matrix.T > 0), mask), axis=0))
         try:
             return list(out_degree)
         except TypeError:
             return [out_degree]
 
+    def get_in_out_degree_node(self, node_name: str, leafless: bool = False):
+        return self._get_in_out_degree_node(self.get_node_number_of(node_name), leafless)
+
+    def _get_in_out_degree_node(self, node_number: int, leafless: bool = False):
+        return self._get_in_degree_node(node_number, leafless), self._get_out_degree_node(node_number, leafless)
+
+    # ---------------------------------------------------------------- CONNECTION METHODS ---------------------------------------------------------------- #
     def get_in_nodes_node(self, node_name: str) -> list:
         """Retrieve all nodes which enter node node_name."""
-        self.logger.debug("Computing nodes entering node {}.".format(node_name))
+        return self.get_node_names_of(self._get_in_nodes_node(self.get_node_number_of(node_name)))
 
-        node_number = self.get_node_number_of(node_name)
-        in_nodes = []
-        for i in (1, 2):
-            in_nodes += list(np.where(self.adj_matrix[node_number, :] == -i)[0]) * (i)
-        return self.get_node_names_of(in_nodes)
+    def _get_in_nodes_node(self, node_number: int) -> list:
+        return list(np.where(self.adj_matrix[node_number, :] == -1)[0]) + list(np.where(self.adj_matrix[node_number, :] == -2)[0]) * 2
 
     def get_out_nodes_node(self, node_name: str) -> list:
         """Retrieve all nodes which exit node node_name."""
-        self.logger.debug("Computing nodes exiting node {}.".format(node_name))
-        node_number = self.get_node_number_of(node_name)
-        out_nodes = list(np.where(self.adj_matrix[node_number, :] == 1)[0]) + list(np.where(self.adj_matrix[node_number, :] == 2)[0])*2
-        out_nodes_names = self.get_node_names_of(out_nodes)
-        return out_nodes_names
+        return self.get_node_names_of(self._get_out_nodes_node(self.get_node_number_of(node_name)))
+
+    def _get_out_nodes_node(self, node_number: int) -> list:
+        return list(np.where(self.adj_matrix[node_number, :] == 1)[0]) + list(np.where(self.adj_matrix[node_number, :] == 2)[0]) * 2
 
     def get_in_nodes_component(self, component: list) -> list:
         """Retrieve all nodes which enter component."""
-        self.logger.debug("Computing nodes entering component {}.".format(component))
+        return self.get_node_names_of(self._get_in_nodes_component(self.get_node_numbers_of(component)))
+
+    def _get_in_nodes_component(self, component: list) -> list:
         in_nodes = np.array([])
-        for node_name in component:
-            in_nodes = np.array(list(itertools.chain(in_nodes, self.get_in_nodes_node(node_name))))
+        for node_number in component:
+            in_nodes = np.array(list(itertools.chain(in_nodes, self._get_in_nodes_node(node_number))))
         return [node for node in in_nodes if node not in component]
 
     def get_out_nodes_component(self, component: list) -> list:
         """Retrieve all nodes which exit component."""
-        self.logger.debug("Computing nodes exiting component {}.".format(component))
-        out_nodes = []
-        for node_name in component:
-            out_nodes = list(itertools.chain(out_nodes, self.get_out_nodes_node(node_name)))
-        return [node for node in out_nodes if node not in component]
+        return self.get_node_names_of(self._get_out_nodes_component(self.get_node_numbers_of(component)))
 
-    def get_in_out_degree_node(self, node_name: str, leafless: bool = False):
-        self.logger.debug("Getting {}in and out degree of node {}.".format("leafless " if leafless else "", node_name))
-        return self.get_in_degree_node(node_name, leafless), self.get_out_degree_node(node_name, leafless)
+    def _get_out_nodes_component(self, component: list) -> list:
+        in_nodes = np.array([])
+        for node_number in component:
+            in_nodes = np.array(list(itertools.chain(in_nodes, self._get_out_nodes_node(node_number))))
+        return [node for node in in_nodes if node not in component]
 
     def get_connections_node(self, node_name: str) -> list:
         """Retrieve all nodes which enter and exit node."""
-        self.logger.debug("Computing nodes entering and exiting {}.".format(node_name))
-        return self.get_in_nodes_node(node_name) + self.get_out_nodes_node(node_name)
+        return self.get_node_names_of(self._get_connections_node(self.get_node_number_of(node_name)))
 
-    def get_leaf_children(self, parents: set, max_depth: int = -1) -> set:
+    def _get_connections_node(self, node_number: int) -> list:
+        return self._get_in_nodes_node(node_number) + self._get_out_nodes_node(node_number)
+
+    def get_leaf_children(self, parent_names: set, max_depth: int = -1) -> set:
         """Retrieve all leaves max_depth below parents."""
-        self.logger.debug("Getting leaf children of {}{}.".format(parents, " up to depth {}".format(max_depth) if max_depth >= 0 else ""))
-        children = self.get_children(parents, max_depth)
-        leaves = set([child for child in children if self.is_leaf_node(child)])
-        return leaves
+        parent_numbers = set(self.get_node_numbers_of(list(parent_names)))
+        leaf_numbers = list(self._get_leaf_children(parent_numbers, max_depth))
+        return set(self.get_node_names_of(leaf_numbers))
 
-    def get_children(self, parents: set, max_depth: int = -1) -> set:
+    def _get_leaf_children(self, parent_names: set, max_depth: int = -1) -> set:
+        """Retrieve all leaves max_depth below parents."""
+        return set([child for child in self._get_children(parent_names, max_depth) if self._is_leaf_node(child)])
+
+    def get_children(self, parent_names: set, max_depth: int = -1) -> set:
         """Retrieve all nodes max_depth below parents."""
-        self.logger.debug("Getting children of {}{}.".format(parents, " up to depth {}".format(max_depth) if max_depth >= 0 else ""))
-        if max_depth == 0:
-            return parents
-        next_generation = set()
-        for parent in parents:
-            next_generation.update(set(self.get_out_nodes_node(parent)))
-        if next_generation:
-            parents.update(self.get_children(next_generation, max_depth - 1))
-            return parents
-        return parents
+        parent_numbers = set(self.get_node_numbers_of(list(parent_names)))
+        children_numbers = self._get_children(parent_numbers, max_depth)
+        return set(self.get_node_names_of(list(children_numbers)))
 
-    def get_parents(self, children: set, max_height: int = -1) -> set:
-        self.logger.debug("Getting parents of {}{}.".format(children, " up to depth {}".format(max_height) if max_height >= 0 else ""))
+    def _get_children(self, parent_numbers: set, max_depth: int = -1) -> set:
+        """Retrieve all nodes max_depth below parents."""
+        if max_depth == 0:
+            return parent_numbers
+        next_generation = set()
+        for parent_number in parent_numbers:
+            next_generation.update(set(self._get_out_nodes_node(parent_number)))
+        if next_generation:
+            parent_numbers.update(self._get_children(next_generation, max_depth - 1))
+            return parent_numbers
+        return parent_numbers
+
+    def get_parents(self, children_names: set, max_height: int = -1) -> set:
         """Retrieve all nodes max_depth above children."""
+        children_numbers = set(self.get_node_numbers_of(list(children_names)))
+        parent_numbers = self._get_parents(children_numbers, max_height)
+        return set(self.get_node_names_of(list(parent_numbers)))
+
+    def _get_parents(self, children_numbers: set, max_height: int = -1) -> set:
         if max_height == 0:
-            return children
+            return children_numbers
         prev_generation = set()
-        for child in children:
-            prev_generation.update(set(self.get_in_nodes_node(child)))
+        for child_number in children_numbers:
+            prev_generation.update(set(self._get_in_nodes_node(child_number)))
         if prev_generation:
-            children.update(self.get_parents(prev_generation, max_height - 1))
-            return children
-        return children
+            children_numbers.update(self._get_parents(prev_generation, max_height - 1))
+            return children_numbers
+        return children_numbers
 
     def get_connected_components(self, leafless: bool = False) -> list:
         """Retrieve the connected components (excluding leaves) of the network."""
-        self.logger.debug("Computing connected components.")
-        # Finds set of connected components
-        # Start with a node
-        # Iteratively checks which nodes it is connected to through 'unchecked_connections'
-        unchecked_nodes = set(self.node_name_map)
+        connected_components = self._get_connections_node(leafless)
+        return [self.get_node_names_of(connected_component) for connected_component in connected_components]
+
+    def _get_connected_components(self, leafless: bool = False) -> list:
+        unchecked_nodes = set(self.node_name_map.inverse)
         components = []
         while unchecked_nodes:
-            node_name = unchecked_nodes.pop()
-            component = [node_name]
-            unchecked_connections = set(self.get_connections_node(node_name)).intersection(unchecked_nodes)
+            node_number = unchecked_nodes.pop()
+            component = [node_number]
+            unchecked_connections = set(self._get_connections_node(node_number)).intersection(unchecked_nodes)
             while unchecked_connections:
-                connection_name = unchecked_connections.pop()
-                unchecked_nodes.remove(connection_name)
-                new_connections = set(self.get_connections_node(connection_name))
+                connection_number = unchecked_connections.pop()
+                unchecked_nodes.remove(connection_number)
+                new_connections = set(self._get_connections_node(connection_number))
                 unchecked_connections = (unchecked_connections.union(new_connections)).intersection(unchecked_nodes)
-                component.append(connection_name)
-            if not (leafless and len(component) == 1 and self.is_leaf_node(component[0])):
+                component.append(connection_number)
+            if not (leafless and len(component) == 1 and self._is_leaf_node(component[0])):
                 components.append(component)
-        self.logger.debug("Connected components are {}.".format(components))
         return components
 
     def get_biconnected_components(self, leafless: bool = False) -> list:
         """Compute biconnected components."""
+        return [self.get_node_names_of(biconnected_component) for biconnected_component in self._get_biconnected_components(leafless)]
+
+    def _get_biconnected_components(self, leafless: bool = False) -> list:
+        """Compute biconnected components."""
         if self.biconnected_components is None:
             cut_arc_matrix = self.get_cut_arc_matrix()
             self.adj_matrix -= cut_arc_matrix - cut_arc_matrix.T
-            self.biconnected_components = self.get_connected_components(leafless=False)
+            self.biconnected_components = self._get_connected_components(leafless=False)
             self.adj_matrix += cut_arc_matrix - cut_arc_matrix.T
 
         if leafless:
-            return [component for component in self.biconnected_components if not (len(component) == 1 and self.is_leaf_node(component[0]))]
+            return [component for component in self.biconnected_components if not (len(component) == 1 and self._is_leaf_node(component[0]))]
         else:
             return self.biconnected_components
 
     def is_biconnected(self, leafless: bool = False) -> bool:
         """Check if network is biconnected"""
-        return len(self.get_biconnected_components(leafless=leafless)) == 1
+        return len(self._get_biconnected_components(leafless=leafless)) == 1
 
     def get_cut_arc_sets(self) -> list:
+        """Retrieve cut-arc sets of network."""
+        return [self.get_node_names_of(cut_arc_set) for cut_arc_set in self._get_cut_arc_sets()]
+
+    def _get_cut_arc_sets(self) -> list:
         """Retrieve cut-arc sets of network."""
         if self.cut_arc_sets is None:
             cut_arc_matrix = self.get_cut_arc_matrix()
             _, to_nodes = np.where(cut_arc_matrix == 1)
             self.cut_arc_sets = []
             for to_node in to_nodes:
-                ca_set = list(self.get_leaf_children({self.get_node_name_of(to_node)}))
+                ca_set = list(self._get_leaf_children({to_node}))
                 ca_set.sort()
                 self.cut_arc_sets.append(ca_set)
         return self.cut_arc_sets
@@ -771,10 +794,8 @@ class RootedLevelKNetwork:
         disc[u_number] = t
         low[u_number] = t
         t += 1
-        u_name = self.get_node_name_of(u_number)
 
-        for v_name in self.get_connections_node(u_name):
-            v_number = self.get_node_number_of(v_name)
+        for v_number in self._get_connections_node(u_number):
             if not visited[v_number]:
                 parent[v_number] = u_number
                 self.cut_arc_helper(v_number, visited, disc, low, parent, cut_arc_matrix, t)
@@ -786,98 +807,104 @@ class RootedLevelKNetwork:
             elif v_number != parent[u_number]:
                 low[u_number] = min(low[u_number], disc[v_number])
 
+    # ---------------------------------------------------------------- NODE TYPE METHODS ---------------------------------------------------------------- #
     def is_leaf_node(self, node_name: str) -> bool:
         """Check if node_name is leaf."""
-        self.logger.debug("Checking if {} is a leaf.".format(node_name))
-        return node_name in self._leaf_names
+        return self._is_leaf_node(self.get_node_number_of(node_name))
+
+    def _is_leaf_node(self, node_number: int) -> bool:
+        return node_number in self.leaf_numbers
 
     def is_reticulation_node(self, node_name: str) -> bool:
         """Check if node_name is reticulation."""
-        self.logger.debug("Checking if {} is a reticulation.".format(node_name))
-        return self.get_in_degree_node(node_name) > 1
+        return self._is_reticulation_node(self.get_node_number_of(node_name))
+
+    def _is_reticulation_node(self, node_number: int) -> bool:
+        """Check if node_name is reticulation."""
+        return self._get_in_degree_node(node_number) > 1
 
     def is_root_node(self, node_name: str) -> bool:
         """Check if node_name is root."""
-        self.logger.debug("Checking if {} is a root.".format(node_name))
-        return self.get_in_degree_node(node_name) == 0
+        return self._is_root_node(self.get_node_number_of(node_name))
+
+    def _is_root_node(self, node_number: int) -> bool:
+        return self._get_in_degree_node(node_number) == 0
 
     def is_structure_node(self, node_name: str) -> bool:
         """Check if node_name is necessary for the structure: not directly connected to any leaves."""
-        self.logger.debug("Checking if {} is a structure node.".format(node_name))
-        return (not self.is_leaf_node(node_name)) and (
-                self.get_out_degree_node(node_name, leafless=False) - self.get_out_degree_node(node_name, leafless=True) == 0)
+        return self._is_structure_node(self.get_node_number_of(node_name))
+
+    def _is_structure_node(self, node_number: int) -> bool:
+        """Check if node_name is necessary for the structure: not directly connected to any leaves."""
+        return (not self._is_leaf_node(node_number)) and (
+                self._get_out_degree_node(node_number, leafless=False) - self._get_out_degree_node(node_number, leafless=True) == 0)
 
     def is_connection_node(self, node_name: str) -> bool:
         """Check if node node_name is not part of underlying generator or leaf"""
-        self.logger.debug("Checking if {} is a connection node.".format(node_name))
-        return self.get_node_type(node_name) == "connection"
+        return self._is_connection_node(self.get_node_number_of(node_name))
+
+    def _is_connection_node(self, node_number: int) -> bool:
+        """Check if node node_name is not part of underlying generator or leaf"""
+        return self._get_node_type(node_number) == "connection"
+
+    def is_generator_node(self, node_name: str) -> bool:
+        """Check if node node_name is not part of underlying generator or leaf"""
+        return self._is_generator_node(self.get_node_number_of(node_name))
+
+    def _is_generator_node(self, node_number: int) -> bool:
+        """Check if node_name is part of the underlying generator."""
+        self.logger.debug("Checking if {} is a generator node.".format(node_number))
+        return self._get_node_type(node_number) in ("structure", "reticulation", "root")
 
     def get_node_type(self, node_name: str) -> str:
+        return self._get_node_type(self.get_node_number_of(node_name))
+
+    def _get_node_type(self, node_number: int) -> str:
         """Find out what type of node node_name is."""
-        self.logger.debug("Compute what type of node node {} is.".format(node_name))
-        if self.is_leaf_node(node_name):
+        if self._is_leaf_node(node_number):
             return "leaf"
-        if self.is_reticulation_node(node_name):
+        if self._is_reticulation_node(node_number):
             return "reticulation"
-        if self.is_root_node(node_name):
+        if self._is_root_node(node_number):
             return "root"
-        if self.is_structure_node(node_name):
+        if self._is_structure_node(node_number):
             return "structure"
         return "connection"
 
-    def is_generator_node(self, node_name: str) -> bool:
-        """Check if node_name is part of the underlying generator."""
-        self.logger.debug("Checking if {} is a generator node.".format(node_name))
-        return self.get_node_type(node_name) in ("structure", "reticulation", "root")
-
     def get_generator_nodes(self) -> list:
         """Retrieve all generator nodes"""
-        self.logger.debug("Retrieving all generator nodes.")
+        return self.get_node_names_of(self._get_generator_nodes())
+
+    def _get_generator_nodes(self) -> list:
         result = []
-        for node in self.node_name_map.keys():
-            if self.is_generator_node(node):
+        for node in self.node_name_map.values():
+            if self._is_generator_node(node):
                 result.append(node)
         return result
 
-    def is_generator(self) -> bool:
-        """Check if the network is isomorphic to a generator."""
-        self.logger.debug("Checking if network is isomorphic to a generator.")
-        for node_name in self.node_name_map.keys():
-            if not self.is_connection_node(node_name):
-                return False
-        return True
-
-    def get_generator_sub_network(self):
-        """Retrieve the underlying generator of the network."""
-        self.logger.debug("Retrieving the underlying generator of the network.")
-        generator_nodes = self.get_generator_nodes()
-        generator_nodes_leaves = self.get_leaf_children(set(generator_nodes), 1)
-        return RootedLevelKNetwork.from_network(self, list(generator_nodes_leaves), suppress_redundant='none', suppress_parallel=False)
-
     def get_edges(self, leafless: bool = False) -> list:
         """Retrieve all the edges (from_node, to_node) in the network."""
-        self.logger.debug("Retrieving all the {}edges in the network.".format("leafless " if leafless else ""))
-        check_size = self.number_of_internals if leafless else self.number_of_nodes
+        return [(self.get_node_name_of(from_node), self.get_node_name_of(to_node)) for from_node, to_node in self._get_edges()]
+
+    def _get_edges(self, leafless: bool = False) -> list:
+        """Retrieve all the edges (from_node, to_node) in the network."""
+        mask = self.leaf_mask if leafless else np.ones(self.number_of_nodes)
         i = 1
         from_nodes, to_nodes = [], []
-        while np.any(self.adj_matrix[:check_size, :check_size] >= i):
-            extra_from_nodes, extra_to_nodes = np.where(self.adj_matrix[:check_size, :check_size] >= i)
-            from_nodes += list(self.get_node_names_of(extra_from_nodes))
-            to_nodes += list(self.get_node_names_of(extra_to_nodes))
+        while np.any(np.multiply(self.adj_matrix, mask) >= i):
+            extra_from_nodes, extra_to_nodes = np.where(np.multiply(self.adj_matrix, mask) >= i)
+            to_nodes.extend(extra_to_nodes)
+            from_nodes.extend(extra_from_nodes)
             i += 1
         return [(from_node, to_node) for from_node, to_node in zip(np.array(from_nodes), np.array(to_nodes))]
 
-    def prune(self, suppress_redundant: str = 'all', suppress_parallel: bool = True):
+    def _prune(self, suppress_redundant: str = 'all', suppress_parallel: bool = True):
         """Suppress al unnecessary/redundant/parallel nodes/edges in network."""
-        self.logger.debug("Pruning: Suppressing {} redundant components{}.".format(suppress_redundant, " and parallel edges" if suppress_parallel else ""))
+        stable_ancestors, lowest_stable_ancestor, nodes_between = self._stable_ancestors(self.leaf_numbers)
 
-        assert suppress_redundant in ('none', 'strongly', 'all'), "suppress_redundant parameter must be one of none, strongly, all."
-
-        stable_ancestors, lowest_stable_ancestor, nodes_between = self.stable_ancestors(self.leaf_names)
-
-        for node_name in self.node_names:
-            if node_name not in nodes_between:
-                self._remove_node_name_from_network(node_name, force=True)
+        for node_number in sorted(list(self.node_name_map.values()), reverse=True):
+            if node_number not in nodes_between:
+                self._remove_node_from_network(node_number, force=True)
 
         changes = True
         while changes:
@@ -888,28 +915,26 @@ class RootedLevelKNetwork:
             # Get non-leaf nodes without children
             childless_nodes = set(np.where(out_degrees == 0)[0])
             childless_nodes.difference_update(leaf_numbers)
-            childless_nodes = self.get_node_names_of(list(childless_nodes))
 
             # Get nodes with no entering arcs and only one exiting arc
             parentless_nodes = set(np.where(in_degrees == 0)[0])
             one_exiting_arc_nodes = set(np.where(out_degrees == 1)[0])
             parentless_one_exiting_arc_nodes = parentless_nodes.intersection(one_exiting_arc_nodes)
-            parentless_one_exiting_arc_nodes = self.get_node_names_of(list(parentless_one_exiting_arc_nodes))
 
             # Get nodes with one in and one out node
             one_entering_arc_nodes = set(np.where(in_degrees == 1)[0])
             one_entering_and_exiting_arc_nodes = one_entering_arc_nodes.intersection(one_exiting_arc_nodes)
-            one_entering_and_exiting_arc_nodes = self.get_node_names_of(list(one_entering_and_exiting_arc_nodes))
 
-            nodes_to_remove = list(set(childless_nodes + parentless_one_exiting_arc_nodes + one_entering_and_exiting_arc_nodes))
-            for node in nodes_to_remove:
+            nodes_to_remove = list(set(list(childless_nodes) + list(parentless_one_exiting_arc_nodes) + list(one_entering_and_exiting_arc_nodes)))
+
+            for node in sorted(nodes_to_remove, reverse=True):
                 changes = True
                 self._suppress_node(node)
 
             # Check for parallel arcs
             if suppress_parallel:
                 parallel_arcs = np.where(self.adj_matrix >= 2)
-                parallel_arcs = zip(self.get_node_names_of(parallel_arcs[0]), self.get_node_names_of(parallel_arcs[1]))
+                parallel_arcs = zip(parallel_arcs[0], parallel_arcs[1])
                 for from_node, to_node in parallel_arcs:
                     changes = True
                     self._remove_connection(from_node, to_node)
@@ -917,20 +942,23 @@ class RootedLevelKNetwork:
             # Check for redundant components:
             if suppress_redundant != 'none':
                 bcs_to_remove = []
-                bcs = self.get_biconnected_components(leafless=True)
+                bcs = self._get_biconnected_components(leafless=True)
                 for bc in bcs:
                     if suppress_redundant == 'strongly' and self._is_strongly_redundant_component(bc):
                         bcs_to_remove.append(bc)
                     if suppress_redundant == 'all' and self._is_redundant_component(bc):
                         bcs_to_remove.append(bc)
+                removed_nodes = []
                 for bc in bcs_to_remove:
                     changes = True
+                    bc = [node - sum(np.array(removed_nodes) < node) for node in bc]
                     self._suppress_component(bc)
+                    removed_nodes.extend(bc)
 
     def _is_redundant_component(self, component: list) -> bool:
         """Check if component is redundant."""
         self.logger.debug("Checking if component {} is redundant.".format(component))
-        out_nodes = self.get_out_nodes_component(component)
+        out_nodes = self._get_out_nodes_component(component)
         if len(out_nodes) != 1:
             return False
         return True
@@ -960,37 +988,42 @@ class RootedLevelKNetwork:
         """Retrieve number of internal, leaves, reticulation nodes."""
         self.logger.debug("Retrieving number of internal, leaves, reticulation nodes.")
         col_sum = sum(self.adj_matrix > 0)
+        if type(col_sum) == int:
+            col_sum = np.array([col_sum])
         number_of_reticulations = sum(col_sum > 1)
-        return self.number_of_internals, self.number_of_leaves, number_of_reticulations
+        return number_of_reticulations - len(self.leaf_numbers), len(self.leaf_numbers), number_of_reticulations
 
     def get_exhibited_trinets(self):
         """Retrieve all trinets exhibited by network."""
         self.logger.debug("Retrieving all exhibited trinets.")
-        leaves = self.get_node_names_of(list(range(self.number_of_internals, self.number_of_nodes)))
+        leaves = self.leaf_numbers
         triplets = itertools.combinations(leaves, 3)
         trinet_info_list = TrinetInfoList()
         for triplet in tqdm(triplets):
-            current_trinet = RootedLevelKNetwork.trinet_from_network(self, list(triplet))
+            current_trinet = RootedLevelKNetwork.trinet_from_network(self, node_numbers=list(triplet))
             trinet_info = TrinetInfo(current_trinet)
             trinet_info_list.append(trinet_info)
         return trinet_info_list
 
     def get_partial_ordering(self) -> list:
+        return [self.get_node_names_of(partial_ordering) for partial_ordering in self._get_partial_ordering()]
 
-        root = self.get_root_name()
+    def _get_partial_ordering(self) -> list:
+        root = self.get_root_number()
+        if self._is_leaf_node(root):
+            return [[]]
         new_result = [[root]]
         result = []
         changes = True
         while changes:
             changes = False
-
             result = copy.deepcopy(new_result)
             new_result = []
             for track in result:
                 new_tracks = []
-                children = self.get_out_nodes_node(track[-1])
+                children = self._get_out_nodes_node(track[-1])
                 for child in children:
-                    if not self.is_leaf_node(child):
+                    if not self._is_leaf_node(child):
                         changes = True
                         new_tracks.append(track + [child])
                 for new_track in new_tracks:
@@ -999,24 +1032,27 @@ class RootedLevelKNetwork:
                     new_result.append(track)
         return result
 
-    def get_leaf_ordering(self):
-        partial_node_ordering = self.get_partial_ordering()
+    def get_leaf_ordering(self) -> list:
+        return [self.get_node_names_of(leaf_ordering) for leaf_ordering in self._get_leaf_ordering()]
+
+    def _get_leaf_ordering(self):
+        partial_node_ordering = self._get_partial_ordering()
         result = []
         for track in partial_node_ordering:
             leaf_track = []
             for node in track:
-                children = self.get_out_nodes_node(node)
+                children = self._get_out_nodes_node(node)
                 if len(children) == 1:
-                    if self.is_leaf_node(children[0]):
+                    if self._is_leaf_node(children[0]):
                         leaf_track.append(children[0])
                         result.append(leaf_track)
                 else:
                     count = 0
-                    if self.is_leaf_node(children[0]):
+                    if self._is_leaf_node(children[0]):
                         leaf_track_1 = copy.copy(leaf_track)
                         leaf_track_1.append(children[0])
                         count += 1
-                    if self.is_leaf_node(children[1]):
+                    if self._is_leaf_node(children[1]):
                         leaf_track_2 = copy.copy(leaf_track)
                         leaf_track_2.append(children[1])
                         count += 2
@@ -1029,21 +1065,21 @@ class RootedLevelKNetwork:
                         result.append(leaf_track_2)
         return [list(x) for x in set(tuple(x) for x in result)]
 
-    def stable_ancestors(self, node_names):
-        leafless_node_names = []
-        for node_name in node_names:
-            if self.is_leaf_node(node_name):
-                parent_of_leaf = self.get_parents({node_name}, max_height=1)
-                parent_of_leaf.remove(node_name)
-                node_name = parent_of_leaf.pop()
-            leafless_node_names.append(node_name)
-        partial_ordering = self.get_partial_ordering()
+    def _stable_ancestors(self, node_numbers: list):
+        leafless_node_numbers = []
+        for node_number in node_numbers:
+            if self._is_leaf_node(node_number):
+                parent_of_leaf = self._get_parents({node_number}, max_height=1)
+                parent_of_leaf.remove(node_number)
+                node_number = parent_of_leaf.pop()
+            leafless_node_numbers.append(node_number)
+        partial_ordering = self._get_partial_ordering()
         tracks_to_min_node = []
         tracks_to_max_node = []
         for track in partial_ordering:
             mi = 10 ** 10
             ma = -1
-            for node in leafless_node_names:
+            for node in leafless_node_numbers:
                 try:
                     mi = min(mi, track.index(node))
                     ma = max(ma, track.index(node))
@@ -1064,9 +1100,14 @@ class RootedLevelKNetwork:
             tracks_between_nodes.append(track[lowest_stable_ancestor_index:])
 
         nodes_between = set(tracks_between_nodes[0]).union(*tracks_between_nodes)
-        nodes_between.update(leafless_node_names)
-        nodes_between.update(node_names)
+        nodes_between.update(leafless_node_numbers)
+        nodes_between.update(node_numbers)
         return stable_ancestors_indicis_dict, lowest_stable_ancestor, nodes_between
+
+    def stable_ancestors(self, node_names: list):
+        node_numbers = self.get_node_numbers_of(node_names)
+        stable_ancestors_indicis_dict, lowest_stable_ancestor, nodes_between = self._stable_ancestors(node_numbers)
+        # TODO: To names
 
     def visualize(self, file_path: str = None):
         """Visualize network."""
@@ -1093,7 +1134,7 @@ class RootedLevelKNetwork:
         ordered_node_names = self.node_names
         mask = self.adj_matrix > 0
         data = self.adj_matrix * mask if directed else self.adj_matrix
-        length = self.number_of_internals if directed else self.number_of_nodes
+        length = self.number_of_nodes - len(self.leaf_numbers) if directed else self.number_of_nodes
         result = pd.DataFrame(columns=ordered_node_names, index=ordered_node_names[:length], data=data[:length])
         return result.astype(int)
 
@@ -1103,8 +1144,8 @@ class RootedLevelKNetwork:
         return [self.get_node_name_of(comp) for comp in component_list]
 
     def equal_structure(self, other):
-        self_partial_ordering = self.get_partial_ordering()
-        other_partial_ordering = other.get_partial_ordering()
+        self_partial_ordering = self._get_partial_ordering()
+        other_partial_ordering = other._get_partial_ordering()
 
         if len(self_partial_ordering) != len(other_partial_ordering):
             return False, bidict()
@@ -1114,35 +1155,40 @@ class RootedLevelKNetwork:
         if s1 != s2:
             return False, bidict()
 
-        self_names = set().union(*self_partial_ordering)
-        other_names = set().union(*other_partial_ordering)
-        if len(self_names) != len(other_names):
+        self_numbers = set().union(*self_partial_ordering)
+        other_numbers = set().union(*other_partial_ordering)
+        if len(self_numbers) != len(other_numbers):
             return False, bidict()
 
-        other_name_iterator = itertools.permutations(other_names)
-        for other_name_iter in other_name_iterator:
-            translation_dict = {other_name: self_name for other_name, self_name in zip(other_name_iter, self_names)}
-            temp_other_partial_ordering = [[translation_dict[other_name] for other_name in row] for row in other_partial_ordering]
+        other_number_iterator = itertools.permutations(other_numbers)
+        for other_name_iter in other_number_iterator:
+            translation_dict = {other_number: self_number for other_number, self_number in zip(other_name_iter, self_numbers)}
+            temp_other_partial_ordering = [[translation_dict[other_number] for other_number in row] for row in other_partial_ordering]
             if self._equal_structure(self_partial_ordering, temp_other_partial_ordering):
-                self_leaves = self.leaf_names
+                self_leaf_numbers = self.leaf_numbers
                 translation_dict = bidict(translation_dict).inverse
 
                 relation_dict = bidict()
                 used_leaves = []
-                for self_leaf in self_leaves:
-                    parents_self_leaf = self.get_parents({self_leaf}, max_height=1)
-                    parents_self_leaf.remove(self_leaf)
+                for self_leaf_number in self_leaf_numbers:
+                    parents_self_leaf = self._get_parents({self_leaf_number}, max_height=1)
+                    parents_self_leaf.remove(self_leaf_number)
                     parent_self_leaf = parents_self_leaf.pop()
+
                     parent_other_leaf = translation_dict[parent_self_leaf]
-                    other_leaves = other.get_children({parent_other_leaf}, max_depth=1)
+                    other_leaves = other._get_children({parent_other_leaf}, max_depth=1)
                     other_leaves.remove(parent_other_leaf)
+
                     chosen_leaf = other_leaves.pop()
-                    if chosen_leaf in used_leaves or not other.is_leaf_node(chosen_leaf):
+
+                    if chosen_leaf in used_leaves or not other._is_leaf_node(chosen_leaf):
                         chosen_leaf = other_leaves.pop()
                     used_leaves.append(chosen_leaf)
-                    relation_dict.put(self_leaf, chosen_leaf)
+                    relation_dict.put(self_leaf_number, chosen_leaf)
 
-                return True, relation_dict
+                return True, bidict(
+                    {self.get_node_name_of(self_leaf_number): other.get_node_name_of(other_leaf_number) for self_leaf_number, other_leaf_number in
+                     relation_dict.items()})
         return False, bidict()
 
     @staticmethod
@@ -1157,106 +1203,19 @@ class RootedLevelKNetwork:
                 return True
         return False
 
-    def equal_structure2(self, other):
-        if not self.number_of_internals == other.number_of_internals:
-            return False, bidict()
-        if not self.adj_matrix.shape == other.adj_matrix.shape:
-            return False, bidict()
+    def evolve(self, recombination_chance: int = 0):
+        assert 0 <= recombination_chance <= 1
+        if random.random.uniform() < recombination_chance:
+            pass
 
-        self_root = self.get_root_name()
-        other_root = other.get_root_name()
-
-        self_root_number = self.get_node_number_of(self_root)
-        other_root_number = other.get_node_number_of(other_root)
-
-        self_matrix = (self.adj_matrix > 0).astype(int)
-        other_matrix = (other.adj_matrix > 0).astype(int)
-
-        equal, relation_dict = self._equal_structure(self_matrix, other_matrix, self_root_number, other_root_number, dict())
-        if equal:
-            return True, bidict({self.get_node_name_of(key): other.get_node_name_of(value) for key, value in
-                                 relation_dict.items() if self.is_leaf_node(self.get_node_name_of(key))})
         else:
-            return False, bidict()
+            leaf_number = random.choice(self.leaf_numbers)
+            self._split_leaf(leaf_number)
 
-    def _equal_structure2(self, matrix_1, matrix_2, root_1, root_2, relation_dict, level=0):
-        if sum(matrix_1[root_1]) != sum(matrix_2[root_2]):
-            return False, dict()
-        if sum(matrix_1[root_1]) == 0:
-            relation_dict[root_1] = root_2
-            return True, relation_dict
-
-        to_nodes_1 = [index for index, value in enumerate(matrix_1[root_1]) if value == 1]
-        to_nodes_2 = [index for index, value in enumerate(matrix_2[root_2]) if value == 1]
-        equal = False
-        if len(to_nodes_1) == 1:
-            to_node_1 = to_nodes_1[0]
-            to_node_2 = to_nodes_2[0]
-            print(f"Comparing {to_node_1} to {to_node_2}")
-            if to_node_1 in relation_dict.keys():
-                if relation_dict[to_node_1] != to_node_2:
-                    print(f"{to_node_1} is already in relat")
-                    return False, dict()
-            new_relation_dict = copy.deepcopy(relation_dict)
-            new_relation_dict[to_node_1] = to_node_2
-            are_equal, returned_relation_dict = self._equal_structure(matrix_1, matrix_2, to_node_1, to_node_2, new_relation_dict, level + 1)
-            if are_equal:
-                relation_dict = returned_relation_dict
-                equal = True
-        elif len(to_nodes_1) == 2:
-            # to_nodes_1 = (a,b), to_nodes_2 = (x,y)
-            # Try: a == x ^ b == y
-            # a == x
-            to_node_1 = to_nodes_1[0]
-            to_node_2 = to_nodes_2[0]
-            print(f"Comparing {to_node_1} to {to_node_2}")
-            are_equal = False
-            if to_node_1 in relation_dict.keys() and relation_dict[to_node_1] == to_node_2:
-                new_relation_dict = copy.deepcopy(relation_dict)
-                new_relation_dict[to_node_1] = to_node_2
-                are_equal, returned_relation_dict = self._equal_structure(matrix_1, matrix_2, to_node_1, to_node_2, new_relation_dict, level + 1)
-            if are_equal:
-                # b == y
-                to_node_1 = to_nodes_1[1]
-                to_node_2 = to_nodes_2[1]
-
-                are_equal = False
-                if to_node_1 in returned_relation_dict.keys() and returned_relation_dict[to_node_1] == to_node_2:
-                    new_relation_dict = copy.deepcopy(returned_relation_dict)
-                    new_relation_dict[to_node_1] = to_node_2
-                    are_equal, returned_relation_dict = self._equal_structure(matrix_1, matrix_2, to_node_1, to_node_2, new_relation_dict, level + 1)
-                if are_equal:
-                    relation_dict = returned_relation_dict
-                    equal = True
-            else:
-                # Try: a == y ^ b == x
-                # a == y
-                to_node_1 = to_nodes_1[0]
-                to_node_2 = to_nodes_2[1]
-                print(f"Comparing {to_node_1} to {to_node_2}")
-                are_equal = False
-                if to_node_1 in relation_dict.keys() and relation_dict[to_node_1] == to_node_2:
-                    new_relation_dict = copy.deepcopy(relation_dict)
-                    new_relation_dict[to_node_1] = to_node_2
-                    are_equal, returned_relation_dict = self._equal_structure(matrix_1, matrix_2, to_node_1, to_node_2, new_relation_dict, level + 1)
-                if are_equal:
-                    # b == x
-                    to_node_1 = to_nodes_1[1]
-                    to_node_2 = to_nodes_2[0]
-                    print(f"Comparing {to_node_1} to {to_node_2}")
-                    are_equal = False
-                    if to_node_1 in returned_relation_dict.keys() and returned_relation_dict[to_node_1] == to_node_2:
-                        new_relation_dict = copy.deepcopy(returned_relation_dict)
-                        new_relation_dict[to_node_1] = to_node_2
-                        are_equal, returned_relation_dict = self._equal_structure(matrix_1, matrix_2, to_node_1, to_node_2, new_relation_dict, level + 1)
-                    if are_equal:
-                        relation_dict = returned_relation_dict
-                        equal = True
-
-        if equal:
-            return True, relation_dict
-        else:
-            return False, dict()
+        self.biconnected_components = None
+        self.partial_ordering = None
+        self.cut_arc_matrix = None
+        self.cut_arc_sets = None
 
     def __str__(self):
         return str(self.to_df())
@@ -1291,7 +1250,7 @@ class TrinetInfo:
 
     @classmethod
     def limit_to(cls, trinet_info, leaf_names):
-        trinet = RootedLevelKNetwork.from_network(trinet_info.trinet, leaf_names, suppress_parallel=True, suppress_redundant='all')
+        trinet = RootedLevelKNetwork.from_network(trinet_info.trinet, node_names=leaf_names, suppress_parallel=True, suppress_redundant='all')
         result = cls(trinet)
         return result
 
@@ -1330,6 +1289,7 @@ class TrinetInfoList(list):
     def add_info(self, trinet_info_list):
         for trinet_info in self:
             equal_structured_trinets, relation_dicts = trinet_info_list.find_equal_structured_trinet(trinet_info.trinet)
+            # TODO check if two?
             try:
                 equal_structured_trinet = equal_structured_trinets[0]
                 trinet_info.add_info(equal_structured_trinet)

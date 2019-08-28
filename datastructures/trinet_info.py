@@ -27,7 +27,7 @@ class TrinetInfo:
 
     @classmethod
     def limit_to(cls, trinet_info, leaf_names):
-        trinet = RootedLevelKNetwork.from_network(trinet_info, leaf_names, suppress_parallel=True, suppress_redundant='all')
+        trinet = RootedLevelKNetwork.from_network(trinet_info, node_names=leaf_names, suppress_parallel=True, suppress_redundant='all')
         result = cls(trinet)
         return result
 

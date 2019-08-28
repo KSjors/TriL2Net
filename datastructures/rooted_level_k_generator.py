@@ -12,7 +12,7 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
         logging.debug("Creating generator network.")
         network = RootedLevelKNetwork.from_dir_adj_matrix(dir_adj_matrix=dir_adj_matrix, level=level, dimension=dimension)
         network.logger.debug("Created for generator network creation.")
-        super().__init__(network.adj_matrix, network.node_name_map, network.leaf_names, network.level, network.dimension)
+        super().__init__(network.adj_matrix, network.node_name_map, leaf_numbers=network.leaf_numbers, level=network.level, dimension=network.dimension)
         self.name = name
         self.logger = logging.getLogger('network.gen.{}'.format(self.uid))
         self.logger.debug("Created through network {}.".format(network.uid))
@@ -28,7 +28,7 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
         # --------- Trinets -----------
         # Create iterator of possible combinations of leaves to add
         all_edges = base_net.get_edges(leafless=True)  # level 0 should not use leafless
-        number_of_generator_leaves = base_net.number_of_leaves
+        number_of_generator_leaves = len(base_net.leaf_numbers)
         edges_iterator = itertools.combinations(all_edges, 3 - number_of_generator_leaves)
 
         # For each possible combination, create trinet and save it to trinets_gen_sides list
@@ -40,7 +40,7 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
             for edge in edges:
                 _, leaf_name = current_trinet.add_leaf_to_edge(edge)
                 extra_leaf_dict[leaf_name] = edge
-            current_trinet.prune()
+            current_trinet._prune()
             if current_trinet.number_of_internals_leaves_reticulations()[2] != self.level:
                 continue
             trinet_info = TrinetInfo(current_trinet, {'generator'        : self, 'generator_name': self.name, 'reticulations': reticulations,
@@ -59,7 +59,7 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
                 _, leaf_name_2 = current_trinet.add_leaf_to_edge([new_node_name, edge[0][1]])
                 extra_leaf_dict[leaf_name_2] = edge[0]
 
-                current_trinet.prune()
+                current_trinet._prune()
                 if current_trinet.number_of_internals_leaves_reticulations()[2] != self.level:
                     continue
                 trinet_info = TrinetInfo(current_trinet, {'generator'      : self, 'generator_name': self.name, 'reticulations': reticulations,
@@ -71,7 +71,7 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
 
         # Create iterator of possible combinations of leaves to add
         all_edges = base_net.get_edges(leafless=True)
-        number_of_generator_leaves = base_net.number_of_leaves
+        number_of_generator_leaves = len(base_net.leaf_numbers)
         edges_iterator = itertools.combinations(all_edges, 2 - number_of_generator_leaves)
 
         # For each possible combination, create binet and save it to trinets_gen_sides list
@@ -82,7 +82,7 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
             for edge in edges:
                 _, leaf_name = current_trinet.add_leaf_to_edge(edge)
                 extra_leaf_dict[leaf_name] = edge
-            current_trinet.prune()
+            current_trinet._prune()
             if current_trinet.number_of_internals_leaves_reticulations()[2] != self.level:
                 continue
             trinet_info = TrinetInfo(current_trinet, {'generator'      : self, 'generator_name': self.name, 'reticulations': reticulations,
@@ -96,10 +96,8 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
         cp = cls.__new__(cls)
         cp.adj_matrix = copy.copy(self.adj_matrix)
         cp.node_name_map = copy.copy(self.node_name_map)
-        cp.leaf_names = copy.copy(self.leaf_names)
-        cp.number_of_leaves = copy.copy(self.number_of_leaves)
+        cp.leaf_numbers = copy.copy(self.leaf_numbers)
         cp.number_of_nodes = copy.copy(self.number_of_nodes)
-        cp.number_of_internals = copy.copy(self.number_of_internals)
         cp.level = copy.copy(self.level)
         cp.dimension = copy.copy(self.dimension)
         cp.uid = guid()
@@ -117,10 +115,8 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
         cp = cls.__new__(cls)
         cp.adj_matrix = copy.deepcopy(self.adj_matrix)
         cp.node_name_map = copy.deepcopy(self.node_name_map)
-        cp.leaf_names = copy.deepcopy(self.leaf_names)
-        cp.number_of_leaves = copy.deepcopy(self.number_of_leaves)
+        cp.leaf_numbers = copy.deepcopy(self.leaf_numbers)
         cp.number_of_nodes = copy.deepcopy(self.number_of_nodes)
-        cp.number_of_internals = copy.deepcopy(self.number_of_internals)
         cp.level = copy.deepcopy(self.level)
         cp.dimension = copy.deepcopy(self.dimension)
         cp.uid = guid()

@@ -189,11 +189,13 @@ class Solver:
 
                     for i in range(len(leaves_on_edges_ordered)):
                         for j in range(len(leaves_on_edges_ordered[i])):
+                            from_node = edges[i][j][0]
                             for leaf in leaves_on_edges_ordered[i][j]:
-                                internal_name, leaf_name = generator.add_leaf_to_edge(edge[i][j], leaf)
+                                internal_name, leaf_name = generator.add_leaf_to_edge((from_node, edges[i][j][1]), leaf)
                                 from_node = internal_name
 
             mss_name = mss_leaf_name(minimal_sink_set)
+            generator.visualize()
             self.last_component = generator
             self.components[mss_name] = generator
             self.transformations[mss_name] = minimal_sink_set
@@ -212,7 +214,6 @@ class Solver:
                 for leaf in side:
                     internal_name, leaf_name = generator.add_leaf_to_edge(edge, leaf)
                     from_node = internal_name
-                    generator.visualize()
 
     @staticmethod
     def sub_leaf_order_matrix(leaf_set, leaf_order_matrix, leaves):

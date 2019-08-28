@@ -106,3 +106,65 @@ def determine_ranking(score_matrix, ranking=None):
     score_matrix[:, best_player] = 0
     ranking.append(best_player)
     return determine_ranking(score_matrix, ranking)
+
+
+def enewick(string):
+    result = []
+    while len(string) > 0:
+        try:
+            left_bracket_index = string.index("(")
+        except ValueError:
+            left_bracket_index = len(string) - 1
+        try:
+            right_bracket_index = string.index(")")
+        except ValueError:
+            right_bracket_index = len(string) - 1
+        try:
+            comma_index = string.index(",")
+        except ValueError:
+            comma_index = len(string) - 1
+        try:
+            space_index = string.index(" ")
+        except ValueError:
+            space_index = len(string) - 1
+        m = min([left_bracket_index, right_bracket_index, comma_index, space_index])
+        if len(string[:m]) > 0:
+            result.append(string[:m])
+        result.append(string[m])
+        string = string[m + 1:]
+
+    adjacency_dict = dict()
+    enewick_helper(np.array(result), adjacency_dict)
+    return adjacency_dict
+
+
+def enewick_helper(string, adjacency_dict):
+    if len(string) == 1:
+        return
+
+    root = string[-1]
+    string = string[1:-2]
+
+    left_bracket_count = (string == '(').astype(int)
+    right_bracket_count = (string == ')').astype(int)
+    cumsum = np.cumsum(left_bracket_count - right_bracket_count)
+    spaces = set(np.where(string == " ")[0])
+    zeroes = set(np.where(cumsum == 0)[0])
+    middle = spaces.intersection(zeroes)
+
+    if len(middle) != 0:
+        middle = middle.pop()
+        left_side = string[:middle - 1]
+        right_side = string[middle + 1:]
+        try:
+            adjacency_dict[root].extend([left_side[-1], right_side[-1]])
+        except KeyError:
+            adjacency_dict[root] = [left_side[-1], right_side[-1]]
+        enewick_helper(left_side, adjacency_dict)
+        enewick_helper(right_side, adjacency_dict)
+    else:
+        try:
+            adjacency_dict[root].extend([string[-1]])
+        except KeyError:
+            adjacency_dict[root] = [string[-1]]
+        enewick_helper(string, adjacency_dict)

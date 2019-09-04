@@ -19,10 +19,16 @@ import time
 import os
 import pprint
 import random
+import scipy
+import collections
+import multiprocessing
 
 pp = pprint.PrettyPrinter(indent=4)
 
 os.environ["PATH"] += os.pathsep + 'C:/Program Files (x86)/Graphviz2.38/bin/'
+
+
+# GLOBALLOCK = multiprocessing.Lock()
 
 
 class RootedLevelKNetwork:
@@ -50,10 +56,10 @@ class RootedLevelKNetwork:
         self.dimension = dimension
 
         # optimization variables
-        self.biconnected_components = None
-        self.partial_ordering = None
-        self.cut_arc_matrix = None
-        self.cut_arc_sets = None
+        self._biconnected_components = None
+        self._partial_ordering = None
+        self._cut_arc_matrix = None
+        self._cut_arc_sets = None
 
     # ---------------------------------------------------------------- CLASS METHODS ---------------------------------------------------------------- #
     def __copy__(self):
@@ -67,10 +73,10 @@ class RootedLevelKNetwork:
         cp.dimension = copy.copy(self.dimension)
         cp.uid = guid()
         cp.logger = logging.getLogger('network.{}'.format(self.uid))
-        cp.biconnected_components = copy.copy(self.biconnected_components)
-        cp.partial_ordering = copy.copy(self.partial_ordering)
-        cp.cut_arc_matrix = copy.copy(self.cut_arc_matrix)
-        cp.cut_arc_sets = copy.copy(self.cut_arc_sets)
+        cp._biconnected_components = copy.copy(self._biconnected_components)
+        cp._partial_ordering = copy.copy(self._partial_ordering)
+        cp._cut_arc_matrix = copy.copy(self._cut_arc_matrix)
+        cp._cut_arc_sets = copy.copy(self._cut_arc_sets)
         return cp
 
     def __deepcopy__(self, memo):
@@ -84,16 +90,16 @@ class RootedLevelKNetwork:
         cp.dimension = copy.deepcopy(self.dimension)
         cp.uid = guid()
         cp.logger = logging.getLogger('network.{}'.format(self.uid))
-        cp.biconnected_components = copy.deepcopy(self.biconnected_components)
-        cp.partial_ordering = copy.deepcopy(self.partial_ordering)
-        cp.cut_arc_matrix = copy.deepcopy(self.cut_arc_matrix)
-        cp.cut_arc_sets = copy.deepcopy(self.cut_arc_sets)
+        cp._biconnected_components = copy.deepcopy(self._biconnected_components)
+        cp._partial_ordering = copy.deepcopy(self._partial_ordering)
+        cp._cut_arc_matrix = copy.deepcopy(self._cut_arc_matrix)
+        cp._cut_arc_sets = copy.deepcopy(self._cut_arc_sets)
         return cp
 
     @classmethod
-    def from_enewick(cls, string):
+    def from_enewick(cls, string, check_valid=True):
         adjacency_dict = enewick(string)
-        result = cls.from_connections_dict(adjacency_dict)
+        result = cls.from_connections_dict(adjacency_dict, check_valid=check_valid)
         return result
 
     @classmethod
@@ -126,12 +132,12 @@ class RootedLevelKNetwork:
         level = copy.copy(network.level)
         dimension = copy.copy(network.dimension)
         new_network = cls(adj_matrix=adj_matrix, node_name_map=node_name_map, leaf_numbers=taxa, level=level, dimension=dimension)
-        new_network._prune(suppress_redundant=suppress_redundant, suppress_parallel=suppress_parallel)
+        new_network.prune(suppress_redundant=suppress_redundant, suppress_parallel=suppress_parallel)
         new_network.logger.debug("Sub-network of network {} with taxa {}.".format(network.uid, taxa))
         return new_network
 
     @classmethod
-    def from_dir_adj_matrix(cls, dir_adj_matrix: np.ndarray, level=2, dimension=2):
+    def from_dir_adj_matrix(cls, dir_adj_matrix: np.ndarray, level=2, dimension=2, check_valid=True):
         """Create network from directed adjacency matrix. Assumes only internal nodes have rows. Other nodes are leaves."""
         logging.debug("Creating network from directed adjacency matrix.")
         shape = dir_adj_matrix.shape
@@ -149,12 +155,12 @@ class RootedLevelKNetwork:
                 node_name_map.put(leaf_name, i)
                 leaf_names.append(leaf_name)
         network = cls(adj_matrix=adj_matrix, node_name_map=node_name_map, leaf_names=leaf_names, level=level, dimension=dimension)
-        assert network.is_valid(), "Connection dictionary results in a invalid network."
+        assert (not check_valid) or network.is_valid(), "Connection dictionary results in a invalid network."
         network.logger.debug("Created from directed adjacency matrix.")
         return network
 
     @classmethod
-    def from_connections_dict(cls, connections_dict: dict, level=2, dimension=2):
+    def from_connections_dict(cls, connections_dict: dict, level=2, dimension=2, check_valid=True):
         """Create network from connection dictionary. Assumes nodes without outgoing arcs are leaves."""
         node_name_map = bidict()
         leaf_names = list()
@@ -176,7 +182,7 @@ class RootedLevelKNetwork:
             for to_node_name in to_node_names:
                 to_node_number = network.get_node_number_of(str(to_node_name))
                 network._add_connection(from_node_number, to_node_number)
-        assert network.is_valid(), "Connection dictionary results in an invalid network."
+        assert (not check_valid) or network.is_valid(), "Connection dictionary results in an invalid network."
         return network
 
     def is_valid(self) -> bool:
@@ -199,10 +205,9 @@ class RootedLevelKNetwork:
         total_number_of_reticulations = sum(in_degrees > 1)
         if total_number_of_reticulations <= self.level:
             return True
-        biconnected_components = self.get_biconnected_components(leafless=True)
+        biconnected_components = self._get_biconnected_components(leafless=True)
         for bc in biconnected_components:
-            node_numbers_bc = self.get_node_numbers_of(bc)
-            in_sum_bc = in_degrees[node_numbers_bc]
+            in_sum_bc = in_degrees[bc]
             number_of_reticulations = sum(in_sum_bc > 1)
             assert number_of_reticulations <= self.level, "Network {} is not valid, biconnected component {} has to many reticulations ({} > {}).".format(
                 self.uid, bc, number_of_reticulations, self.level)
@@ -264,13 +269,18 @@ class RootedLevelKNetwork:
 
     # --------------------------------------------------------- ALTER NETWORK METHODS --------------------------------------------------------- #
     def standardize_internal_node_names(self) -> None:
-        self.logger.debug(f"Standardizing internal node names")
-        # Temporary names
         for internal_node in self.internal_node_numbers:
             self._rename_node(internal_node, self.get_node_name_of(internal_node) + "^")
 
         for index, internal_node in enumerate(self.internal_node_numbers):
             self._rename_node(internal_node, str(index))
+
+    def standardize_leaf_node_names(self) -> None:
+        for leaf_number in self.leaf_numbers:
+            self._rename_node(leaf_number, self.get_node_name_of(leaf_number) + "^")
+
+        for leaf_node in self.leaf_numbers:
+            self._rename_node(leaf_node, self.first_unused_leaf_name())
 
     def rename_node(self, old_name: str, new_name: str) -> None:
         """Replace name of node with name old_name by new_name."""
@@ -287,9 +297,9 @@ class RootedLevelKNetwork:
         except ValueError:
             pass
 
-        self.biconnected_components = None
-        self.partial_ordering = None
-        self.cut_arc_sets = None
+        self._biconnected_components = None
+        self._partial_ordering = None
+        self._cut_arc_sets = None
 
     def _rename_node(self, node_number: int, new_name: str) -> None:
         assert new_name not in self.node_names, f"There already exists a node with node name {new_name}."
@@ -306,9 +316,9 @@ class RootedLevelKNetwork:
         except ValueError:
             pass
 
-        self.biconnected_components = None
-        self.partial_ordering = None
-        self.cut_arc_sets = None
+        self._biconnected_components = None
+        self._partial_ordering = None
+        self._cut_arc_sets = None
 
     def shrink(self, leaf_names_set):
         """Shrink set of leaves"""
@@ -326,7 +336,7 @@ class RootedLevelKNetwork:
         for leaf in leaf_numbers_set:
             self._remove_leaf_status_node(leaf)
         self._rename_node(leaf_to_keep, mss_name)
-        self._prune()
+        self.prune()
         return mss_name
 
     def _add_connection(self, from_node_number: int, to_node_number: int):
@@ -334,10 +344,10 @@ class RootedLevelKNetwork:
         self.adj_matrix[from_node_number][to_node_number] += 1
         self.adj_matrix[to_node_number][from_node_number] -= 1
 
-        self.biconnected_components = None
-        self.partial_ordering = None
-        self.cut_arc_matrix = None
-        self.cut_arc_sets = None
+        self._biconnected_components = None
+        self._partial_ordering = None
+        self._cut_arc_matrix = None
+        self._cut_arc_sets = None
 
     def _remove_connection(self, from_node_number: int, to_node_number: int):
         """Remove connection between from_node_name and to_node_name."""
@@ -347,10 +357,10 @@ class RootedLevelKNetwork:
         self.adj_matrix[from_node_number][to_node_number] -= 1
         self.adj_matrix[to_node_number][from_node_number] += 1
 
-        self.biconnected_components = None
-        self.partial_ordering = None
-        self.cut_arc_matrix = None
-        self.cut_arc_sets = None
+        self._biconnected_components = None
+        self._partial_ordering = None
+        self._cut_arc_matrix = None
+        self._cut_arc_sets = None
 
     def _remove_node_from_dict(self, node_number: int) -> None:
         """Remove node with name node_name from node_names dictionary."""
@@ -378,10 +388,10 @@ class RootedLevelKNetwork:
         self._remove_node_from_dict(node_number)
         self.number_of_nodes -= 1
 
-        self.biconnected_components = None
-        self.partial_ordering = None
-        self.cut_arc_matrix = None
-        self.cut_arc_sets = None
+        self._biconnected_components = None
+        self._partial_ordering = None
+        self._cut_arc_matrix = None
+        self._cut_arc_sets = None
 
     def _remove_component(self, component: list) -> None:
         """Remove all nodes in component."""
@@ -396,7 +406,7 @@ class RootedLevelKNetwork:
         if leaf:
             node_name = self.first_unused_leaf_name() if node_name is None else node_name
         else:
-            node_name = str(node_number) if node_name is None else node_name
+            node_name = self.first_unused_internal_name() if node_name is None else node_name
 
         self.node_name_map.put(node_name, node_number)
         return node_name, node_number
@@ -444,7 +454,7 @@ class RootedLevelKNetwork:
         """Remove leaf and prune to make a proper network again"""
         leaf_number = self.get_node_number_of(leaf_name)
         self._remove_leaf_status_node(leaf_number)
-        self._prune()
+        self.prune()
 
     def _remove_leaf_status_node(self, node_number: int):
         """Remove leaf with name node_name"""
@@ -468,36 +478,63 @@ class RootedLevelKNetwork:
         self._add_connection(internal_number, leaf_number)
         return internal_number, leaf_number
 
-    def recombine_leaves(self, leaf_name_1: str, leaf_name_2: str) -> str:
+    def recombine_leaves(self, leaf_name_1: str, leaf_name_2: str) -> None:
         assert self.is_leaf_node(leaf_name_1) and self.is_leaf_node(leaf_name_2), "Can not recombine non-leaf nodes"
-        return self.get_node_name_of(self._recombine_leaves(self.get_node_number_of(leaf_name_1), self.get_node_number_of(leaf_name_2)))
+        self.get_node_name_of(self._recombine_leaves(self.get_node_number_of(leaf_name_1), self.get_node_number_of(leaf_name_2)))
 
-    def _recombine_leaves(self, leaf_number_1: int, leaf_number_2: int) -> int:
-        parent_number_2 = self._get_parents({leaf_number_2}, max_height=1)
-        parent_number_2.remove(leaf_number_2)
-        self._add_connection(parent_number_2.pop(), leaf_number_1)
+    def _recombine_leaves(self, leaf_number_1: int, leaf_number_2: int) -> None:
+        assert self._is_leaf_node(leaf_number_1) and self._is_leaf_node(leaf_number_2), "Can not recombine non-leaf nodes"
+        self._remove_leaf_status_node(leaf_number_1)
+        self._remove_leaf_status_node(leaf_number_2)
 
         leaf_name_1 = self.get_node_name_of(leaf_number_1)
         leaf_name_2 = self.get_node_name_of(leaf_number_2)
+
+        new_leaf_name_1 = "(" + leaf_name_1 + "-R)"
+        new_leaf_name_2 = "(" + leaf_name_2 + "-R)"
         recombined_leaf_name = "(" + leaf_name_1 + "x" + leaf_name_2 + ")"
-        self.rename_node(leaf_name_1, recombined_leaf_name)
 
-        self._remove_node_from_network(leaf_number_2)
+        new_leaf_name_1, new_leaf_number_1 = self._add_node_to_network(new_leaf_name_1, leaf=True)
+        new_leaf_name_2, new_leaf_number_2 = self._add_node_to_network(new_leaf_name_2, leaf=True)
+        internal_leaf_name, internal_leaf_number = self._add_node_to_network(leaf=False)
+        recombined_leaf_name, recombined_leaf_number = self._add_node_to_network(recombined_leaf_name, leaf=True)
 
-        return leaf_number_1 - int(leaf_number_2 < leaf_number_1)
+        self._add_connection(leaf_number_1, new_leaf_number_1)
+        self._add_connection(leaf_number_2, new_leaf_number_2)
+        self._add_connection(leaf_number_1, internal_leaf_number)
+        self._add_connection(leaf_number_2, internal_leaf_number)
+        self._add_connection(internal_leaf_number, recombined_leaf_number)
+
+        # parent_number_1 = self._get_parents({leaf_number_1}, max_height=1)
+        # parent_number_1.remove(leaf_number_1)
+        # parent_number_1 = parent_number_1.pop()
+        # parent_number_2 = self._get_parents({leaf_number_2}, max_height=1)
+        # parent_number_2.remove(leaf_number_2)
+        # parent_number_2 = parent_number_2.pop()
+        # self._remove_node_from_network(leaf_number_1, force=True)
+        # self._remove_node_from_network(leaf_number_2 - int(leaf_number_1 < leaf_number_2), force=True)
+        #
+        # internal_node_name, internal_node_number = self._add_node_to_network(leaf=False)
+        # leaf_node_name, leaf_node_number = self._add_node_to_network(recombined_leaf_name, leaf=True)
+        # self._add_connection(parent_number_1 - int(leaf_number_1 < parent_number_1) - int(leaf_number_2 < parent_number_1), internal_node_number)
+        # self._add_connection(parent_number_2 - int(leaf_number_1 < parent_number_2) - int(leaf_number_2 < parent_number_2), internal_node_number)
+        # self._add_connection(internal_node_number, leaf_node_number)
+        #
+        # return leaf_node_number - int(leaf_number_1 < leaf_node_number) - int(leaf_number_2 < leaf_node_number)
 
     def split_leaf(self, leaf_name_to_split: str):
         """ Split leaf into two leaves"""
         assert self.is_leaf_node(leaf_name_to_split), "Can not split non-leaf-node"
-        self._split_leaf(self.get_node_number_of(leaf_name_to_split))
+        return self.get_node_names_of(list(self._split_leaf(self.get_node_number_of(leaf_name_to_split))))
 
-    def _split_leaf(self, leaf_number_to_split: int):
+    def _split_leaf(self, leaf_number_to_split: int) -> (int, int):
         self._remove_leaf_status_node(leaf_number_to_split)
         leaf_name_to_split = self.get_node_name_of(leaf_number_to_split)
-        _, left_leaf_number = self._add_node_to_network(node_name=leaf_name_to_split + "-I", leaf=True)
-        _, right_leaf_number = self._add_node_to_network(node_name=leaf_name_to_split + "-II", leaf=True)
+        _, left_leaf_number = self._add_node_to_network(node_name='(' + leaf_name_to_split + "-I)", leaf=True)
+        _, right_leaf_number = self._add_node_to_network(node_name='(' + leaf_name_to_split + "-II)", leaf=True)
         self._add_connection(leaf_number_to_split, left_leaf_number)
         self._add_connection(leaf_number_to_split, right_leaf_number)
+        return left_leaf_number, right_leaf_number
 
     def replace_leaf_with_network(self, leaf_name_to_replace: str, replacement_network):
         assert self.is_leaf_node(leaf_name_to_replace), f"Cannot replace leaf {leaf_name_to_replace} with network as it is not a leaf."
@@ -537,6 +574,13 @@ class RootedLevelKNetwork:
                 if to_node_name in replacement_network_internal_node_names:
                     to_node_name += "*"
                 self._add_connection(internal_node_number, self.get_node_number_of(to_node_name))
+
+    def first_unused_internal_name(self) -> str:
+        """Find first unused leaf name in numerical order."""
+        i = 0
+        while str(i) in self.node_name_map:
+            i += 1
+        return str(i)
 
     def first_unused_leaf_name(self) -> str:
         """Find first unused leaf name in alphabetical order."""
@@ -737,56 +781,75 @@ class RootedLevelKNetwork:
                 components.append(component)
         return components
 
-    def get_biconnected_components(self, leafless: bool = False) -> list:
+    def optimization_available(self) -> bool:
+        return self._biconnected_components is not None and self._partial_ordering is not None and self._cut_arc_matrix is not None and self._cut_arc_sets is not None
+
+    def calculate_optimzation_variables(self) -> None:
+        self.cut_arc_matrix
+        self._get_cut_arc_sets()
+        self._get_biconnected_components()
+        self._get_partial_ordering()
+
+    def reset_optimization_variables(self) -> None:
+        self._biconnected_components = None
+        self._partial_ordering = None
+        self._cut_arc_matrix = None
+        self._cut_arc_sets = None
+
+    @property
+    def biconnected_components(self) -> list:
         """Compute biconnected components."""
-        return [self.get_node_names_of(biconnected_component) for biconnected_component in self._get_biconnected_components(leafless)]
+        return [self.get_node_names_of(biconnected_component) for biconnected_component in self._get_biconnected_components(leafless=False)]
 
     def _get_biconnected_components(self, leafless: bool = False) -> list:
         """Compute biconnected components."""
-        if self.biconnected_components is None:
-            cut_arc_matrix = self.get_cut_arc_matrix()
+        if self._biconnected_components is None:
+            cut_arc_matrix = self.cut_arc_matrix
             self.adj_matrix -= cut_arc_matrix - cut_arc_matrix.T
-            self.biconnected_components = self._get_connected_components(leafless=False)
+            self._biconnected_components = self._get_connected_components(leafless=False)
             self.adj_matrix += cut_arc_matrix - cut_arc_matrix.T
 
         if leafless:
-            return [component for component in self.biconnected_components if not (len(component) == 1 and self._is_leaf_node(component[0]))]
+            return [component for component in self._biconnected_components if not (len(component) == 1 and self._is_leaf_node(component[0]))]
         else:
-            return self.biconnected_components
+            return self._biconnected_components
 
     def is_biconnected(self, leafless: bool = False) -> bool:
         """Check if network is biconnected"""
         return len(self._get_biconnected_components(leafless=leafless)) == 1
 
-    def get_cut_arc_sets(self) -> list:
+    @property
+    def cut_arc_sets(self) -> list:
         """Retrieve cut-arc sets of network."""
         return [self.get_node_names_of(cut_arc_set) for cut_arc_set in self._get_cut_arc_sets()]
 
     def _get_cut_arc_sets(self) -> list:
         """Retrieve cut-arc sets of network."""
-        if self.cut_arc_sets is None:
-            cut_arc_matrix = self.get_cut_arc_matrix()
+        if self._cut_arc_sets is None:
+            cut_arc_matrix = self.cut_arc_matrix
             _, to_nodes = np.where(cut_arc_matrix == 1)
-            self.cut_arc_sets = []
+            self._cut_arc_sets = []
             for to_node in to_nodes:
                 ca_set = list(self._get_leaf_children({to_node}))
                 ca_set.sort()
-                self.cut_arc_sets.append(ca_set)
-        return self.cut_arc_sets
+                self._cut_arc_sets.append(ca_set)
+        return self._cut_arc_sets
 
-    def get_cut_arc_matrix(self) -> np.ndarray:
+    @property
+    def cut_arc_matrix(self) -> np.ndarray:
         """Compute indicator matrix for arcs which are cut-arcs."""
-        visited = [False] * self.number_of_nodes
-        disc = [-1] * self.number_of_nodes
-        low = [-1] * self.number_of_nodes
-        parent = [None] * self.number_of_nodes
-        cut_arc_matrix = np.zeros((self.number_of_nodes, self.number_of_nodes))
+        if self._cut_arc_matrix is None:
+            visited = [False] * self.number_of_nodes
+            disc = [-1] * self.number_of_nodes
+            low = [-1] * self.number_of_nodes
+            parent = [None] * self.number_of_nodes
+            self._cut_arc_matrix = np.zeros((self.number_of_nodes, self.number_of_nodes))
 
-        for i in range(self.number_of_nodes):
-            if not visited[i]:
-                self.cut_arc_helper(i, visited, disc, low, parent, cut_arc_matrix)
+            for i in range(self.number_of_nodes):
+                if not visited[i]:
+                    self.cut_arc_helper(i, visited, disc, low, parent, self._cut_arc_matrix)
 
-        return cut_arc_matrix
+        return self._cut_arc_matrix
 
     def cut_arc_helper(self, u_number, visited, disc, low, parent, cut_arc_matrix, t=0):
         # TODO source: https://www.geeksforgeeks.org/bridge-in-a-graph/
@@ -898,7 +961,7 @@ class RootedLevelKNetwork:
             i += 1
         return [(from_node, to_node) for from_node, to_node in zip(np.array(from_nodes), np.array(to_nodes))]
 
-    def _prune(self, suppress_redundant: str = 'all', suppress_parallel: bool = True):
+    def prune(self, suppress_redundant: str = 'all', suppress_parallel: bool = True):
         """Suppress al unnecessary/redundant/parallel nodes/edges in network."""
         stable_ancestors, lowest_stable_ancestor, nodes_between = self._stable_ancestors(self.leaf_numbers)
 
@@ -993,44 +1056,55 @@ class RootedLevelKNetwork:
         number_of_reticulations = sum(col_sum > 1)
         return number_of_reticulations - len(self.leaf_numbers), len(self.leaf_numbers), number_of_reticulations
 
-    def get_exhibited_trinets(self):
+    def get_exhibited_trinets(self, max_processes=1):
         """Retrieve all trinets exhibited by network."""
         self.logger.debug("Retrieving all exhibited trinets.")
+
         leaves = self.leaf_numbers
-        triplets = itertools.combinations(leaves, 3)
         trinet_info_list = TrinetInfoList()
-        for triplet in tqdm(triplets):
-            current_trinet = RootedLevelKNetwork.trinet_from_network(self, node_numbers=list(triplet))
-            trinet_info = TrinetInfo(current_trinet)
-            trinet_info_list.append(trinet_info)
+        total = int(scipy.special.comb(len(leaves), 3))
+        triplets = list(itertools.combinations(leaves, 3))
+
+        pool = multiprocessing.Pool(max_processes)
+        trinet_info_list = TrinetInfoList()
+        for x in tqdm(pool.imap_unordered(self._exhibited_trinets_helper, triplets), total=total):
+            trinet_info_list.append(x)
+        pool.close()
         return trinet_info_list
 
-    def get_partial_ordering(self) -> list:
+    def _exhibited_trinets_helper(self, triplet):
+        result = TrinetInfo(self.trinet_from_network(self, node_numbers=list(triplet)))
+        return result
+
+    @property
+    def partial_ordering(self) -> list:
         return [self.get_node_names_of(partial_ordering) for partial_ordering in self._get_partial_ordering()]
 
     def _get_partial_ordering(self) -> list:
-        root = self.get_root_number()
-        if self._is_leaf_node(root):
-            return [[]]
-        new_result = [[root]]
-        result = []
-        changes = True
-        while changes:
-            changes = False
-            result = copy.deepcopy(new_result)
-            new_result = []
-            for track in result:
-                new_tracks = []
-                children = self._get_out_nodes_node(track[-1])
-                for child in children:
-                    if not self._is_leaf_node(child):
-                        changes = True
-                        new_tracks.append(track + [child])
-                for new_track in new_tracks:
-                    new_result.append(new_track)
-                if len(new_tracks) == 0:
-                    new_result.append(track)
-        return result
+        if self._partial_ordering is None:
+            root = self.get_root_number()
+            if self._is_leaf_node(root):
+                self._partial_ordering = [[]]
+                return self._partial_ordering
+            new_result = [[root]]
+            self._partial_ordering = []
+            changes = True
+            while changes:
+                changes = False
+                self._partial_ordering = new_result
+                new_result = []
+                for track in self._partial_ordering:
+                    new_tracks = []
+                    children = self._get_out_nodes_node(track[-1])
+                    for child in children:
+                        if not self._is_leaf_node(child):
+                            changes = True
+                            new_tracks.append(track + [child])
+                    for new_track in new_tracks:
+                        new_result.append(new_track)
+                    if len(new_tracks) == 0:
+                        new_result.append(track)
+        return self._partial_ordering
 
     def get_leaf_ordering(self) -> list:
         return [self.get_node_names_of(leaf_ordering) for leaf_ordering in self._get_leaf_ordering()]
@@ -1143,7 +1217,7 @@ class RootedLevelKNetwork:
         self.logger.debug("Retrieve node names of {}.".format(component_list))
         return [self.get_node_name_of(comp) for comp in component_list]
 
-    def equal_structure(self, other):
+    def equal_structure_old(self, other):
         self_partial_ordering = self._get_partial_ordering()
         other_partial_ordering = other._get_partial_ordering()
 
@@ -1164,7 +1238,7 @@ class RootedLevelKNetwork:
         for other_name_iter in other_number_iterator:
             translation_dict = {other_number: self_number for other_number, self_number in zip(other_name_iter, self_numbers)}
             temp_other_partial_ordering = [[translation_dict[other_number] for other_number in row] for row in other_partial_ordering]
-            if self._equal_structure(self_partial_ordering, temp_other_partial_ordering):
+            if self._equal_structure_old(self_partial_ordering, temp_other_partial_ordering):
                 self_leaf_numbers = self.leaf_numbers
                 translation_dict = bidict(translation_dict).inverse
 
@@ -1192,7 +1266,7 @@ class RootedLevelKNetwork:
         return False, bidict()
 
     @staticmethod
-    def _equal_structure(partial_ordering, other_partial_ordering):
+    def _equal_structure_old(partial_ordering, other_partial_ordering):
         n = len(partial_ordering)
         it = itertools.permutations(range(n))
         for permutation in it:
@@ -1203,19 +1277,181 @@ class RootedLevelKNetwork:
                 return True
         return False
 
-    def evolve(self, recombination_chance: int = 0):
-        assert 0 <= recombination_chance <= 1
-        if random.random.uniform() < recombination_chance:
-            pass
+    def equal_structure(self, other, optimize=True, equal_naming=False) -> (bool, list, list):
+        if self.number_of_nodes != other.number_of_nodes:
+            return False, [], []
+        if len(self.leaf_numbers) != len(other.leaf_numbers):
+            return False, [], []
+        if optimize or (self.optimization_available() and other.optimization_available()):
+            if len(self._get_cut_arc_sets()) != len(other._get_cut_arc_sets()):
+                return False, [], []
+            if collections.Counter([len(cut_arc_set) for cut_arc_set in self._get_cut_arc_sets()]) != \
+                    collections.Counter([len(cut_arc_set) for cut_arc_set in other._get_cut_arc_sets()]):
+                return False, [], []
 
+        self_root = self.get_root_number()
+        other_root = other.get_root_number()
+        translation_dict = bidict()
+        translation_dict[self_root] = other_root
+        translation_dicts = self._equal_structure(self_current_node=self_root, other=other, other_current_node=other_root,
+                                                  translation_dicts=[translation_dict], optimize=optimize, equal_naming=equal_naming)
+        translation_dicts = [bidict({self.get_node_name_of(key): other.get_node_name_of(item) for key, item in translation_dict.items()})
+                             for translation_dict in translation_dicts]
+        leaf_translation_dicts = [bidict({key: item for key, item in translation_dict.items() if self.is_leaf_node(key)}) for translation_dict in
+                                  translation_dicts]
+        return len(translation_dicts) > 0, translation_dicts, leaf_translation_dicts
+
+    def _equal_structure(self, self_current_node, other, other_current_node, translation_dicts, optimize, equal_naming):
+        if len(translation_dicts) == 0:
+            return translation_dicts  # False
+        if self._is_leaf_node(self_current_node) and other._is_leaf_node(other_current_node):
+            if (not equal_naming) or self.get_node_name_of(self_current_node) == other.get_node_name_of(other_current_node):
+                for translation_dict in translation_dicts:
+                    if len(translation_dict) == self.number_of_nodes:
+                        return [translation_dict]
+                return translation_dicts  # True
+
+        self_node_children = self._get_children({self_current_node}, max_depth=1).difference({self_current_node})
+        other_node_children = other._get_children({other_current_node}, max_depth=1).difference({other_current_node})
+        if len(other_node_children) != len(self_node_children):
+            return []  # False
+        if optimize or (self.optimization_available() and other.optimization_available()):
+            self_node_cut_arc_sets = [len(cut_arc_set) for cut_arc_set in self._get_cut_arc_sets() if self_current_node in cut_arc_set]
+            other_node_cut_arc_sets = [len(cut_arc_set) for cut_arc_set in other._get_cut_arc_sets() if other_current_node in cut_arc_set]
+            if collections.Counter(self_node_cut_arc_sets) != collections.Counter(other_node_cut_arc_sets):
+                return []  # False
+        if len(self_node_children) == 1:
+            self_child = self_node_children.pop()
+            other_child = other_node_children.pop()
+            new_translation_dicts = []
+            for translation_dict in translation_dicts:
+                if not check_bidict(translation_dict, self_child, other_child):
+                    continue
+                new_translation_dict = copy.deepcopy(translation_dict)
+                new_translation_dict[self_child] = other_child
+                new_dicts = self._equal_structure(self_child, other, other_child, [new_translation_dict], optimize=optimize, equal_naming=equal_naming)
+                for new_dict in new_dicts:
+                    if len(new_dict) == self.number_of_nodes:
+                        return [new_dict]
+                new_translation_dicts.extend(new_dicts)
+            return new_translation_dicts
+        if len(self_node_children) == 2:
+            translation_dicts_to_return = []
+            self_child_1 = self_node_children.pop()
+            self_child_2 = self_node_children.pop()
+            other_child_1 = other_node_children.pop()
+            other_child_2 = other_node_children.pop()
+
+            # Option 1
+            for translation_dict in translation_dicts:
+                if not (check_bidict(translation_dict, self_child_1, other_child_1) and check_bidict(translation_dict, self_child_2, other_child_2)):
+                    continue
+                new_translation_dict = copy.deepcopy(translation_dict)
+                new_translation_dict[self_child_1] = other_child_1
+                new_translation_dict[self_child_2] = other_child_2
+                returned_translation_dicts_1 = self._equal_structure(self_child_1, other, other_child_1, [new_translation_dict], optimize=optimize, equal_naming=equal_naming)
+                for returned_translation_dict_1 in returned_translation_dicts_1:
+                    new_dicts = self._equal_structure(self_child_2, other, other_child_2, [returned_translation_dict_1], optimize=optimize, equal_naming=equal_naming)
+                    for new_dict in new_dicts:
+                        if len(new_dict) == self.number_of_nodes:
+                            return [new_dict]
+                    translation_dicts_to_return.extend(new_dicts)
+
+            # Option 2
+            for translation_dict in translation_dicts:
+                if not (check_bidict(translation_dict, self_child_1, other_child_2) and check_bidict(translation_dict, self_child_2, other_child_1)):
+                    continue
+                new_translation_dict = copy.deepcopy(translation_dict)
+                new_translation_dict[self_child_1] = other_child_2
+                new_translation_dict[self_child_2] = other_child_1
+                returned_translation_dicts_1 = self._equal_structure(self_child_1, other, other_child_2, [new_translation_dict], optimize=optimize, equal_naming=equal_naming)
+                for returned_translation_dict_1 in returned_translation_dicts_1:
+                    new_dicts = self._equal_structure(self_child_2, other, other_child_1, [returned_translation_dict_1], optimize=optimize, equal_naming=equal_naming)
+                    for new_dict in new_dicts:
+                        if len(new_dict) == self.number_of_nodes:
+                            return [new_dict]
+                    translation_dicts_to_return.extend(new_dicts)
+            return translation_dicts_to_return
+
+    def evolve_times(self, times: int, recombination_chance: int = 0):
+        for time in range(times):
+            self.evolve(recombination_chance)
+
+        changes = True
+        while changes:
+            changes = False
+            in_degrees = np.array(self.get_in_degrees())
+            biconnected_components = self._get_biconnected_components(leafless=True)
+            for bc in biconnected_components:
+                in_sum_bc = in_degrees[bc]
+                bc_reticulations = {bc[node_number] for node_number in np.where(in_sum_bc == 2)[0]}
+                if len(bc_reticulations) - self.level > 0:
+                    changes=True
+                    reticulation_to_remove = bc_reticulations.pop()
+                    children_of_reticulation = sorted(list(self._get_children({reticulation_to_remove})), reverse=True)
+                    for node_number in children_of_reticulation:
+                        self._remove_node_from_network(node_number)
+                    break
+        self.standardize_leaf_node_names()
+        self.standardize_internal_node_names()
+        self.prune()
+
+    def evolve(self, recombination_chance: int = 0):
+        # Note: does not keep level intact perfectly
+        assert 0 <= recombination_chance <= 1
+        if np.random.uniform() < recombination_chance:
+            try:
+                node_levels_dict = {0: set(self.leaf_numbers)}
+                in_degrees = np.array(self.get_in_degrees())
+                biconnected_components = self._get_biconnected_components(leafless=True)
+                for bc in biconnected_components:
+                    in_sum_bc = in_degrees[bc]
+                    bc_level = sum(in_sum_bc > 1)
+                    bc = self._get_leaf_children(set(bc), max_depth=1)
+                    try:
+                        node_levels_dict[bc_level].update(bc)
+                    except KeyError:
+                        node_levels_dict[bc_level] = set(bc)
+                    if bc_level > 0:
+                        node_levels_dict[0].difference_update(bc)
+                first_leaf = set().union(*node_levels_dict.values()).pop()
+                max_level = max(node_levels_dict.keys())
+                for level in set(range(max(max_level, self.level))).difference(node_levels_dict.keys()):
+                    node_levels_dict[level] = {}
+                first_leaf_level = np.where(np.array([int(first_leaf in node_levels_dict[level]) for level in range(max_level + 1)]) == 1)[0][0]
+                max_second_leaf_level = self.level - first_leaf_level - 1
+                second_leaf = set(itertools.chain.from_iterable([node_levels_dict[level] for level in range(max_second_leaf_level + 1)])).difference(
+                    [first_leaf]).pop()
+                self._recombine_leaves(first_leaf, second_leaf)
+            except KeyError:
+                pass
         else:
             leaf_number = random.choice(self.leaf_numbers)
-            self._split_leaf(leaf_number)
+            left_leaf_number, right_leaf_number = self._split_leaf(leaf_number)
 
-        self.biconnected_components = None
-        self.partial_ordering = None
-        self.cut_arc_matrix = None
-        self.cut_arc_sets = None
+        self._biconnected_components = None
+        self._partial_ordering = None
+        self._cut_arc_matrix = None
+        self._cut_arc_sets = None
+
+    def enewick(self):
+        return self._enewick(self.get_root_number())
+
+    def _enewick(self, current_node, traversed_nodes=None):
+        traversed_nodes = coalesce(traversed_nodes, [])
+        if current_node in traversed_nodes:
+            return self.get_node_name_of(current_node)
+        traversed_nodes.append(current_node)
+        current_node_children = self._get_children({current_node}, max_depth=1).difference([current_node])
+        if len(current_node_children) == 0:
+            return self.get_node_name_of(current_node)
+        elif len(current_node_children) == 1:
+            child = current_node_children.pop()
+            return "(" + self._enewick(child, traversed_nodes) + ")" + self.get_node_name_of(current_node)
+        elif len(current_node_children) == 2:
+            child_1 = current_node_children.pop()
+            child_2 = current_node_children.pop()
+            return "(" + self._enewick(child_1, traversed_nodes) + ", " + self._enewick(child_2, traversed_nodes) + ")" + self.get_node_name_of(current_node)
 
     def __str__(self):
         return str(self.to_df())
@@ -1242,7 +1478,7 @@ class TrinetInfo:
         return bool(can_shrink)
 
     def calculate_info(self):
-        self.info['cut_arc_sets'] = self.trinet.get_cut_arc_sets()
+        self.info['cut_arc_sets'] = self.trinet.cut_arc_sets
 
     def add_info(self, trinet_info):
         for key, value in trinet_info.info.items():
@@ -1278,9 +1514,9 @@ class TrinetInfo:
         return str(self.trinet.leaf_names) + "\n" + pp.pformat(self.info)
 
 
-class TrinetInfoList(list):
-    def __init__(self):
-        super().__init__()
+class TrinetInfoList:
+    def __init__(self, lst: list = None):
+        self.list = coalesce(lst, [])
 
     def calculate_info(self):
         for trinet_info in self:
@@ -1300,29 +1536,44 @@ class TrinetInfoList(list):
 
     def shrink(self, leaf_set):
         to_remove = []
-        for trinet_info in iter(self):
+        for trinet_info in self:
             if not trinet_info.shrink(leaf_set):
                 to_remove.append(trinet_info)
         for trinet_info in to_remove:
             self.remove(trinet_info)
         # TODO, remove duplicates?
 
+        # to_keep = TrinetInfoList()
+        # leaf_iterator = itertools.combinations(self.represented_leaves(), 3)
+        # for triplet in leaf_iterator:
+        #     trinet_info_list = self.find_trinet_by_leaf_names(triplet)
+        #     for trinet_info in trinet_info_list:
+        #         for trinet_info_2 in to_keep:
+        #             if set(trinet_info.trinet.leaf_names) == set(trinet_info_2.trinet.leaf_names) and trinet_info.trinet.equal_structure(trinet_info_2.trinet):
+        #                 break
+        #         else:
+        #             to_keep.append(trinet_info)
+        # self.list = to_keep.list
+
     def append(self, other):
         assert type(other) == TrinetInfo, "Can only add object of type TrinetInfo to a TrinetInfoList"
-        super().append(other)
+        self.list.append(other)
+
+    def extend(self, other):
+        self.list.extend(other)
 
     def find_equal_structured_trinet(self, trinet):
         result = TrinetInfoList()
         relation_dicts = []
-        for trinet_info in iter(self):
-            are_equal, relation_dict = trinet_info.trinet.equal_structure(trinet)
+        for trinet_info in self:
+            are_equal, relation_dict, leaf_translation_dicts = trinet_info.trinet.equal_structure(trinet, optimize=True)
             if are_equal:
                 result.append(trinet_info)
-                relation_dicts.append(relation_dict)
+                relation_dicts.append(leaf_translation_dicts[0])
         return result, relation_dicts
 
     def find_equal_trinet(self, trinet):
-        for trinet_info in iter(self):
+        for trinet_info in self:
             if trinet_info.trinet == trinet:
                 return trinet_info
         return False
@@ -1331,14 +1582,10 @@ class TrinetInfoList(list):
         return self.find_trinet_by_leaf_names(trinet.leaf_names)
 
     def find_trinet_by_leaf_names(self, leaf_names):
-        result = TrinetInfoList()
-        for trinet_info in iter(self):
-            if set(trinet_info.trinet.leaf_names) == set(leaf_names):
-                result.append(trinet_info)
-        return result
+        return TrinetInfoList([trinet_info for trinet_info in self.list if set(trinet_info.trinet.leaf_names) == set(leaf_names)])
 
     def contains_trinet_with_leaf_names(self, leaf_names):
-        for trinet_info in iter(self):
+        for trinet_info in self:
             if set(trinet_info.trinet.leaf_names) == set(leaf_names):
                 return True
         return False
@@ -1353,18 +1600,18 @@ class TrinetInfoList(list):
         # assert len(leaf_names) >= 2, "Leaf_names should always include at least two leaves"
         result = TrinetInfoList()
         if len(leaf_names) > 2:
-            for trinet_info in iter(self):
+            for trinet_info in self:
                 if set(trinet_info.trinet.leaf_names).issubset(leaf_names):
                     result.append(trinet_info)
         else:
-            for trinet_info in iter(self):
+            for trinet_info in self:
                 if set(leaf_names).issubset(trinet_info.trinet.leaf_names):
                     result.append(TrinetInfo.limit_to(trinet_info, leaf_names))
         return result
 
     def trinets_where(self, category, value):
         result = TrinetInfoList()
-        for trinet_info in iter(self):
+        for trinet_info in self:
             if trinet_info[category] == value:
                 result.append(trinet_info)
         return result
@@ -1452,7 +1699,10 @@ class TrinetInfoList(list):
         for trinet_info in self:
             relation_dict = trinet_info['relation_dict']
             for key, value in relation_dict.items():
-                relation_dict_count[value][key] += 1
+                try:
+                    relation_dict_count[value][key] += 1
+                except KeyError:
+                    trinet_info.trinet.visualize()
             for leaf, edge in trinet_info['extra_leaf_dict'].items():
                 translated_leaf = relation_dict[leaf]
                 try:
@@ -1508,11 +1758,20 @@ class TrinetInfoList(list):
                         leaf_order_matrix[low_leaf, high_leaf] += 1
         return leaf_set, leaf_order_matrix
 
-    def order_leaves(self, edge_leaf_dict, generator):
-        symmetrical_nodes = generator.symmetrical_nodes
-
     def __add__(self, other):
         result = copy.deepcopy(self)
         for oth in other:
             result.append(oth)
         return result
+
+    def remove(self, other):
+        self.list.remove(other)
+
+    def __getitem__(self, item):
+        return self.list[item]
+
+    def __iter__(self):
+        return iter(self.list)
+
+    def __len__(self):
+        return len(self.list)

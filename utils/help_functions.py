@@ -29,7 +29,7 @@ def all_combinations(any_list, min_len, max_len, direction=1):
 
 
 def leaf_name_iterator(min_len, max_len):
-    alphabet = list('ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+    alphabet = list('DEFGHIJKLMNOPQRSTUVWXYZ')
     alphabet_iterator = all_combinations(alphabet, min_len, max_len + 1)
     return alphabet_iterator
 
@@ -78,7 +78,7 @@ def leaf_names_to_identifier(leaf_names: list) -> tuple:
 
 
 def mss_leaf_name(mss):
-    return '(' + "".join(sorted(mss)) + ')'
+    return '(' + "-".join(sorted(mss)) + ')'
 
 
 def coalesce(value, default=None):
@@ -168,3 +168,22 @@ def enewick_helper(string, adjacency_dict):
         except KeyError:
             adjacency_dict[root] = [string[-1]]
         enewick_helper(string, adjacency_dict)
+
+
+def check_bidict(bdict: bidict, first, second) -> bool:
+    try:
+        if bdict[first] != second:
+            return False
+    except KeyError:
+        pass
+    try:
+        if bdict.inverse[second] != first:
+            return False
+    except KeyError:
+        pass
+    return True
+
+
+
+
+dct = {1: 2, 2: 3}

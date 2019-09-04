@@ -8,9 +8,9 @@ import copy
 
 
 class RootedLevelKGenerator(RootedLevelKNetwork):
-    def __init__(self, name, dir_adj_matrix: np.ndarray, symmetrical_nodes: bidict, level: int = 2, dimension: int = 2):
+    def __init__(self, name, dir_adj_matrix: np.ndarray, symmetrical_nodes: bidict, level: int = 2, dimension: int = 2, check_valid: bool = True):
         logging.debug("Creating generator network.")
-        network = RootedLevelKNetwork.from_dir_adj_matrix(dir_adj_matrix=dir_adj_matrix, level=level, dimension=dimension)
+        network = RootedLevelKNetwork.from_dir_adj_matrix(dir_adj_matrix=dir_adj_matrix, level=level, dimension=dimension, check_valid=check_valid)
         network.logger.debug("Created for generator network creation.")
         super().__init__(network.adj_matrix, network.node_name_map, leaf_numbers=network.leaf_numbers, level=network.level, dimension=network.dimension)
         self.name = name
@@ -40,7 +40,7 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
             for edge in edges:
                 _, leaf_name = current_trinet.add_leaf_to_edge(edge)
                 extra_leaf_dict[leaf_name] = edge
-            current_trinet._prune()
+            current_trinet.prune()
             if current_trinet.number_of_internals_leaves_reticulations()[2] != self.level:
                 continue
             trinet_info = TrinetInfo(current_trinet, {'generator'        : self, 'generator_name': self.name, 'reticulations': reticulations,
@@ -59,7 +59,7 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
                 _, leaf_name_2 = current_trinet.add_leaf_to_edge([new_node_name, edge[0][1]])
                 extra_leaf_dict[leaf_name_2] = edge[0]
 
-                current_trinet._prune()
+                current_trinet.prune()
                 if current_trinet.number_of_internals_leaves_reticulations()[2] != self.level:
                     continue
                 trinet_info = TrinetInfo(current_trinet, {'generator'      : self, 'generator_name': self.name, 'reticulations': reticulations,
@@ -82,13 +82,12 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
             for edge in edges:
                 _, leaf_name = current_trinet.add_leaf_to_edge(edge)
                 extra_leaf_dict[leaf_name] = edge
-            current_trinet._prune()
+            current_trinet.prune()
             if current_trinet.number_of_internals_leaves_reticulations()[2] != self.level:
                 continue
             trinet_info = TrinetInfo(current_trinet, {'generator'      : self, 'generator_name': self.name, 'reticulations': reticulations,
                                                       'extra_leaf_dict': extra_leaf_dict, 'level': self.level, 'symmetrical_nodes': self.symmetrical_nodes})
             trinet_info_list.append(trinet_info)
-
         return trinet_info_list
 
     def __copy__(self):
@@ -104,10 +103,10 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
         cp.name = copy.copy(self.name)
         cp.symmetrical_nodes = copy.copy(self.symmetrical_nodes)
         cp.logger = logging.getLogger('network.{}'.format(self.uid))
-        cp.biconnected_components = copy.copy(self.biconnected_components)
-        cp.partial_ordering = copy.copy(self.partial_ordering)
-        cp.cut_arc_matrix = copy.copy(self.cut_arc_matrix)
-        cp.cut_arc_sets = copy.copy(self.cut_arc_sets)
+        cp._biconnected_components = copy.copy(self._biconnected_components)
+        cp._partial_ordering = copy.copy(self._partial_ordering)
+        cp._cut_arc_matrix = copy.copy(self._cut_arc_matrix)
+        cp._cut_arc_sets = copy.copy(self._cut_arc_sets)
         return cp
 
     def __deepcopy__(self, memo):
@@ -123,10 +122,10 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
         cp.name = copy.deepcopy(self.name)
         cp.symmetrical_nodes = copy.deepcopy(self.symmetrical_nodes)
         cp.logger = logging.getLogger('network.{}'.format(self.uid))
-        cp.biconnected_components = copy.deepcopy(self.biconnected_components)
-        cp.partial_ordering = copy.deepcopy(self.partial_ordering)
-        cp.cut_arc_matrix = copy.deepcopy(self.cut_arc_matrix)
-        cp.cut_arc_sets = copy.deepcopy(self.cut_arc_sets)
+        cp._biconnected_components = copy.deepcopy(self._biconnected_components)
+        cp._partial_ordering = copy.deepcopy(self._partial_ordering)
+        cp._cut_arc_matrix = copy.deepcopy(self._cut_arc_matrix)
+        cp._cut_arc_sets = copy.deepcopy(self._cut_arc_sets)
         return cp
 
 

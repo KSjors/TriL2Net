@@ -31,7 +31,7 @@ def regenerate_trinets() -> None:
     for level, generator_list in all_generators.items():
         for generator in generator_list:
             generator_trinet_info_list = generator.build_trinets()
-            trinet_info_list += generator_trinet_info_list
+            trinet_info_list.extend(generator_trinet_info_list)
 
     pickle_out = open("data/all_trinets_save.pickle", 'wb')
     data = [all_generators, trinet_info_list]

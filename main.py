@@ -1,8 +1,22 @@
 import logging
 
 # TODO
+#  -- CORRECT INPUT --
+#  LEVEL-1 input
+#  -- TEST ALTERED INPUT --
+#  Swap leaves in some trinets
+#  Swap trinet for other trinet
+#  -- PROOF --
+#  Pseudocode interesting functions
+#  Proof that for correct input output also correct
+#  Proof auxilliary graph theorem
+#  -- OPTIMIZE --
+#  Pruning
 #  Isomorphism checking
-#  Random level-k network generation
+#  -- RANDOM --
+#  Do not add leaf which increases level
+#  -- WRITE --
+
 
 logging_level = logging.INFO
 # set up logging to file - see previous section for more details
@@ -34,73 +48,68 @@ import data.generators as generator
 from data.all_trinets import get_trinets, regenerate_trinets, pickle_save, pickle_read
 from utils.help_functions import *
 import timeit
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+import scipy.stats as stats
 
+if __name__ == '__main__':
+    rebuild = {
+        'generators': 0
+        , 'network' : 1
+        , 'trinets' : 0
+    }
 
-rebuild = {
-    'generators': 0
-    , 'network' : 0
-    , 'trinets' : 0
-}
+    os.environ["PATH"] += os.pathsep + 'C:/Program Files (x86)/Graphviz2.38/bin/'
+    filename_save_trinets_B = 'data/trinets'
 
-os.environ["PATH"] += os.pathsep + 'C:/Program Files (x86)/Graphviz2.38/bin/'
-filename_save_trinets_B = 'data/trinets'
+    """ Build or load trinets """
+    if rebuild['generators']:
+        regenerate_trinets()
+    _, standard_trinet_info_list = get_trinets()
 
-""" Build or load trinets """
-if rebuild['generators']:
-    regenerate_trinets()
-_, standard_trinet_info_list = get_trinets()
+    """ Build or load network """
+    if rebuild['network']:
+        dct = test_networks.connections_0
+        main_network = RootedLevelKNetwork.from_connections_dict(dct)
+        dct_1 = test_networks.connections_1
+        network_1 = RootedLevelKNetwork.from_connections_dict(dct_1)
+        dct_2a = test_networks.connections_2a
+        network_2a = RootedLevelKNetwork.from_connections_dict(dct_2a)
+        dct_2b = test_networks.connections_2b
+        network_2b = RootedLevelKNetwork.from_connections_dict(dct_2b)
+        dct_2c = test_networks.connections_2c
+        network_2c = RootedLevelKNetwork.from_connections_dict(dct_2c)
+        dct_2d = test_networks.connections_2d
+        network_2d = RootedLevelKNetwork.from_connections_dict(dct_2d)
 
-""" Build or load network """
-if rebuild['network']:
-    dct = test_networks.connections_0
-    main_network = RootedLevelKNetwork.from_connections_dict(dct)
-    dct_1 = test_networks.connections_1
-    network_1 = RootedLevelKNetwork.from_connections_dict(dct_1)
-    dct_2a = test_networks.connections_2a
-    network_2a = RootedLevelKNetwork.from_connections_dict(dct_2a)
-    dct_2b = test_networks.connections_2b
-    network_2b = RootedLevelKNetwork.from_connections_dict(dct_2b)
-    dct_2c = test_networks.connections_2c
-    network_2c = RootedLevelKNetwork.from_connections_dict(dct_2c)
-    dct_2d = test_networks.connections_2d
-    network_2d = RootedLevelKNetwork.from_connections_dict(dct_2d)
+        main_network.replace_leaf_with_network('D1', network_1)
+        main_network.standardize_internal_node_names()
+        main_network.replace_leaf_with_network('D2', network_2a)
+        main_network.standardize_internal_node_names()
+        main_network.replace_leaf_with_network('D3', network_2b)
+        main_network.standardize_internal_node_names()
+        # main_network.replace_leaf_with_network('D4', network_2c)
+        # main_network.standardize_internal_node_names()
+        # main_network.replace_leaf_with_network('D5', network_2d)
+        # main_network.standardize_internal_node_names()
 
-    main_network.replace_leaf_with_network('D1', network_1)
-    main_network.standardize_internal_node_names()
-    # main_network.replace_leaf_with_network('D2', network_2a)
-    # main_network.standardize_internal_node_names()
-    # main_network.replace_leaf_with_network('D3', network_2b)
-    # main_network.standardize_internal_node_names()
-    # main_network.replace_leaf_with_network('D4', network_2c)
-    # main_network.standardize_internal_node_names()
-    # main_network.replace_leaf_with_network('D5', network_2d)
-    # main_network.standardize_internal_node_names()
+        # enewick = '(a, b)0'
+        # main_network = RootedLevelKNetwork.from_enewick(enewick)
+        # main_network.evolve_times(30, 0.2)
 
-    pickle_save("data/network.pickle", main_network)
-main_network = pickle_read("data/network.pickle")
-main_network.visualize()
+        pickle_save("data/network.pickle", main_network)
+    main_network = pickle_read("data/network.pickle")
+    main_network.visualize()
 
-""" Build or load trinets """
-if rebuild['trinets'] or rebuild['network']:
-    trinet_info_list = main_network.get_exhibited_trinets()
-    pickle_save('data/trinets', trinet_info_list)
-trinet_info_list = pickle_read('data/trinets')
+    """ Build or load trinets """
+    if rebuild['trinets'] or rebuild['network']:
+        trinet_info_list = main_network.get_exhibited_trinets(max_processes=12)
+        pickle_save('data/trinets', trinet_info_list)
+    trinet_info_list = pickle_read('data/trinets')
 
-# """ Solver """
-# solver = Solver(trinet_info_list)
-#
-# solver.solve()
+    """ Solver """
+    solver = Solver(standard_trinet_info_list, trinet_info_list)
+    network = solver.solve()
+    network.visualize()
 
-
-a = '((1, ((2, (3, (4)Y#H1)g)e, (((Y#H1, 5)h, 6)f)X#H2)c)a, ((X#H2, 7)d, 8)b)r'
-network = RootedLevelKNetwork.from_enewick(a)
-network.visualize()
-
-""" Play around """
-# network_solved = solver.solve()
-# print(network.stable_ancestors(['C', 'D']))
-
-# trinet.visualize()
-# print(network.equal_structure(network_solved))
-
-
+    print(network.equal_structure(main_network))

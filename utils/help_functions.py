@@ -1,5 +1,7 @@
 import logging
 import itertools
+import operator as op
+from functools import reduce
 import copy
 import time
 import random
@@ -28,8 +30,13 @@ def all_combinations(any_list, min_len, max_len, direction=1):
             for i in range(min_len, max_len).__reversed__())
 
 
-def leaf_name_iterator(min_len, max_len):
-    alphabet = list('DEFGHIJKLMNOPQRSTUVWXYZ')
+def leaf_name_iterator(min_len, max_len, char_type='alph'):
+    assert char_type in ('alph', 'ALPH')
+    alphabet = ""
+    if char_type == 'alph':
+        alphabet = list('abcdefghijklmnopqrstuvwxyz')
+    elif char_type == 'ALPH':
+        alphabet = list('ABCDEFGHIJKLMNOPQRSTUVWXYZ')
     alphabet_iterator = all_combinations(alphabet, min_len, max_len + 1)
     return alphabet_iterator
 
@@ -184,6 +191,11 @@ def check_bidict(bdict: bidict, first, second) -> bool:
     return True
 
 
+def ncr(n, r):
+    r = min(r, n - r)
+    numer = reduce(op.mul, range(n, n - r, -1), 1)
+    denom = reduce(op.mul, range(1, r + 1), 1)
+    return numer / denom
 
 
 dct = {1: 2, 2: 3}

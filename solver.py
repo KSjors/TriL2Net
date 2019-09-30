@@ -24,13 +24,12 @@ class Solver:
         self.logger.info('Started solving')
         self.logger.info('Shrinking ...')
         while self.next_shrink():
+            # self.last_component.visualize()
             continue
         self.logger.info('Expanding ...')
         while self.expand_mss(self.last_component):
-            self.last_component.visualize()
             continue
         self.logger.info('Finished solving')
-        self.last_component.visualize()
         return self.last_component
 
     def next_shrink(self, max_processes=1):
@@ -167,7 +166,10 @@ class Solver:
                 side_orders = []
                 edge_side_leaf_dict = dict()
                 for index, edge in enumerate(edges[0]):
-                    leaves = edge_leaf_dict[edge]
+                    try:
+                        leaves = edge_leaf_dict[edge]
+                    except KeyError:
+                        leaves = {}
                     sides = len(sides_per_edge[edge])
                     sub_leaf_order_matrix, sub_leaf_set = self.sub_leaf_order_matrix(leaf_set, leaf_order_matrix_1, leaves)
                     ordered_leaves = self.order_leaves(sub_leaf_set, sub_leaf_order_matrix, sides=sides)
@@ -175,7 +177,6 @@ class Solver:
                     edge_side_leaf_dict[edge] = ordered_leaves
                     for row_index, row in enumerate(ordered_leaves):
                         leaves_on_edges[row_index][index] = row
-
                 side_separation = self.align_sides(side_orders, leaf_set, leaf_order_matrix_1)
 
                 leaves_on_edges_ordered = copy.deepcopy(leaves_on_edges)
@@ -200,7 +201,6 @@ class Solver:
                             from_node = internal_name
 
         mss_name = mss_leaf_name(minimal_sink_set)
-        generator.visualize()
         self.last_component = generator
         self.components[mss_name] = generator
         self.transformations[mss_name] = minimal_sink_set
@@ -234,7 +234,7 @@ class Solver:
     @staticmethod
     def order_leaves(leaf_set, leaf_order_matrix, sides=1):
         assert sides in (1, 2), "Only works for 1 or 2 sides"
-        side_orders = ([[] for side in range(sides)])
+        side_orders = ([[] for _ in range(sides)])
         placed_leaves = []
         # place all leaves which have children or parents on the same side
         for _ in [0, 1]:
@@ -269,7 +269,6 @@ class Solver:
                         side_alignment_1 /= len(side_orders[side])
 
                 best_side = np.argmax(side_alignment_1)
-
                 side_orders[best_side].append(current_leaf)
                 placed_leaves.append(current_leaf)
 
@@ -279,6 +278,8 @@ class Solver:
 
         if len(placed_leaves) < len(leaf_set.keys()):
             for leaf in leaf_set.keys():
+                if leaf in placed_leaves:
+                    continue
                 for side_order in side_orders:
                     if len(side_order) == 0:
                         side_order.append(leaf)
@@ -308,7 +309,10 @@ class Solver:
         side_order_matrix_2 = np.array([])
         for side in active_sides:
             leaf_indicis_of_side = [leaf_set.inverse[leaf] for leaf in side]
-            new_col = np.sum((side_order_matrix[:, leaf_indicis_of_side]), axis=1)
+            if side_order_matrix.ndim > 1:
+                new_col = np.sum((side_order_matrix[:, leaf_indicis_of_side]), axis=1)
+            else:
+                new_col = np.array([[np.sum((side_order_matrix[leaf_indicis_of_side]))]])
             try:
                 side_order_matrix_2 = np.vstack([side_order_matrix_2, new_col])
             except ValueError:

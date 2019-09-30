@@ -12,13 +12,13 @@ import logging
 #  Proof auxilliary graph theorem
 #  -- OPTIMIZE --
 #  Pruning
-#  Isomorphism checking
+#  Isomorphism checking --> separate code for trees?
 #  -- RANDOM --
 #  Do not add leaf which increases level
 #  -- WRITE --
 
 
-logging_level = logging.INFO
+logging_level = logging.WARNING
 # set up logging to file - see previous section for more details
 logging.basicConfig(level=logging_level,
                     format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
@@ -42,10 +42,10 @@ logging.getLogger('network').addHandler(fh)
 
 import os
 import data.test_networks as test_networks
-from datastructures.rooted_level_k_network import RootedLevelKNetwork
+from datastructures.rooted_level_k_network import RootedLevelKNetwork, TrinetInfoList
 from solver import Solver
 import data.generators as generator
-from data.all_trinets import get_trinets, regenerate_trinets, pickle_save, pickle_read
+from data.all_trinets import get_standard_networks, regenerate_standard_networks, pickle_save, pickle_read
 from utils.help_functions import *
 import timeit
 from tqdm import tqdm
@@ -54,18 +54,17 @@ import scipy.stats as stats
 
 if __name__ == '__main__':
     rebuild = {
-        'generators': 0
-        , 'network' : 1
+        'generators': 1
+        , 'network' : 0
         , 'trinets' : 0
     }
 
     os.environ["PATH"] += os.pathsep + 'C:/Program Files (x86)/Graphviz2.38/bin/'
-    filename_save_trinets_B = 'data/trinets'
 
     """ Build or load trinets """
     if rebuild['generators']:
-        regenerate_trinets()
-    _, standard_trinet_info_list = get_trinets()
+        regenerate_standard_networks()
+    _, biconnected_trinet_binet_list, all_trinet_list = get_standard_networks()
 
     """ Build or load network """
     if rebuild['network']:
@@ -82,34 +81,33 @@ if __name__ == '__main__':
         dct_2d = test_networks.connections_2d
         network_2d = RootedLevelKNetwork.from_connections_dict(dct_2d)
 
-        main_network.replace_leaf_with_network('D1', network_1)
-        main_network.standardize_internal_node_names()
-        main_network.replace_leaf_with_network('D2', network_2a)
-        main_network.standardize_internal_node_names()
-        main_network.replace_leaf_with_network('D3', network_2b)
-        main_network.standardize_internal_node_names()
-        # main_network.replace_leaf_with_network('D4', network_2c)
+        # main_network.replace_leaf_with_network('D1', network_1)
         # main_network.standardize_internal_node_names()
-        # main_network.replace_leaf_with_network('D5', network_2d)
+        # main_network.replace_leaf_with_network('D2', network_2a)
         # main_network.standardize_internal_node_names()
+        # main_network.replace_leaf_with_network('D3', network_2b)
+        # main_network.standardize_internal_node_names()
+        main_network.replace_leaf_with_network('D4', network_2c)
+        main_network.standardize_internal_node_names()
+        main_network.replace_leaf_with_network('D5', network_2d)
+        main_network.standardize_internal_node_names()
 
-        # enewick = '(a, b)0'
-        # main_network = RootedLevelKNetwork.from_enewick(enewick)
-        # main_network.evolve_times(30, 0.2)
 
         pickle_save("data/network.pickle", main_network)
-    main_network = pickle_read("data/network.pickle")
-    main_network.visualize()
+    network = pickle_read('data/network.pickle')
 
     """ Build or load trinets """
-    if rebuild['trinets'] or rebuild['network']:
-        trinet_info_list = main_network.get_exhibited_trinets(max_processes=12)
+    if rebuild['trinets']:
+        trinet_info_list = network.get_exhibited_trinets(max_processes=6, progress_bar=True)
         pickle_save('data/trinets', trinet_info_list)
     trinet_info_list = pickle_read('data/trinets')
 
-    """ Solver """
-    solver = Solver(standard_trinet_info_list, trinet_info_list)
-    network = solver.solve()
-    network.visualize()
+    # print(trinet_info_list.summary())
 
-    print(network.equal_structure(main_network))
+
+    trinet_info_list.replace_distort(1, all_trinet_list)
+
+    print(trinet_info_list.summary(per_network=True))
+
+    ''' Testing '''
+    #

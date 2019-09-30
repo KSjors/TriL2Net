@@ -1,4 +1,4 @@
-from datastructures.rooted_level_k_network import RootedLevelKNetwork, TrinetInfoList, TrinetInfo
+from datastructures.rooted_level_k_network import RootedLevelKNetwork, TrinetInfoList, NetworkInfo
 import numpy as np
 from utils.help_functions import guid
 import itertools
@@ -27,7 +27,7 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
 
         # --------- Trinets -----------
         # Create iterator of possible combinations of leaves to add
-        all_edges = base_net.get_edges(leafless=True)  # level 0 should not use leafless
+        all_edges = base_net.get_edges(leafless=True)
         number_of_generator_leaves = len(base_net.leaf_numbers)
         edges_iterator = itertools.combinations(all_edges, 3 - number_of_generator_leaves)
 
@@ -43,9 +43,9 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
             current_trinet.prune()
             if current_trinet.number_of_internals_leaves_reticulations()[2] != self.level:
                 continue
-            trinet_info = TrinetInfo(current_trinet, {'generator'        : self, 'generator_name': self.name, 'reticulations': reticulations,
-                                                      'extra_leaf_dict'  : copy.deepcopy(extra_leaf_dict), 'level': self.level,
-                                                      'symmetrical_nodes': self.symmetrical_nodes})
+            trinet_info = NetworkInfo(current_trinet, {'generator'        : self, 'generator_name': self.name, 'reticulations': reticulations,
+                                                       'extra_leaf_dict'  : copy.deepcopy(extra_leaf_dict), 'level': self.level,
+                                                       'symmetrical_nodes': self.symmetrical_nodes})
             trinet_info_list.append(trinet_info)
 
         # In case generator has only one leaf, also add two leaves to the same edge (only need to do one node of every symmetry pair)
@@ -54,6 +54,7 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
             edges_iterator = itertools.combinations(all_edges, 1)
             for edge in edges_iterator:
                 current_trinet = copy.deepcopy(base_net)
+                current_trinet.reset_optimization_variables()
                 new_node_name, leaf_name_1 = current_trinet.add_leaf_to_edge(edge[0])
                 extra_leaf_dict[leaf_name_1] = edge[0]
                 _, leaf_name_2 = current_trinet.add_leaf_to_edge([new_node_name, edge[0][1]])
@@ -62,33 +63,42 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
                 current_trinet.prune()
                 if current_trinet.number_of_internals_leaves_reticulations()[2] != self.level:
                     continue
-                trinet_info = TrinetInfo(current_trinet, {'generator'      : self, 'generator_name': self.name, 'reticulations': reticulations,
-                                                          'extra_leaf_dict': copy.deepcopy(extra_leaf_dict),
-                                                          'level'          : self.level, 'symmetrical_nodes': self.symmetrical_nodes})
+                trinet_info = NetworkInfo(current_trinet, {'generator'      : self, 'generator_name': self.name, 'reticulations': reticulations,
+                                                           'extra_leaf_dict': copy.deepcopy(extra_leaf_dict),
+                                                           'level'          : self.level, 'symmetrical_nodes': self.symmetrical_nodes})
                 trinet_info_list.append(trinet_info)
+        return trinet_info_list
+
+    def build_binets(self):
+        """Build all possible trinets."""
+        self.logger.debug("Building all possible trinets.")
+        base_net = copy.deepcopy(self)
+
+        reticulations = self.get_leaf_children(set(self.get_reticulations()), 1)
 
         # --------- Binets -----------
-
         # Create iterator of possible combinations of leaves to add
         all_edges = base_net.get_edges(leafless=True)
         number_of_generator_leaves = len(base_net.leaf_numbers)
         edges_iterator = itertools.combinations(all_edges, 2 - number_of_generator_leaves)
 
         # For each possible combination, create binet and save it to trinets_gen_sides list
+        binet_info_list = TrinetInfoList()
         for edges in edges_iterator:
             extra_leaf_dict = {}
             # Add extra leaves to base net and save together with underlying generator (self) and added edges
-            current_trinet = copy.deepcopy(base_net)
+            current_binet = copy.deepcopy(base_net)
+            current_binet.reset_optimization_variables()
             for edge in edges:
-                _, leaf_name = current_trinet.add_leaf_to_edge(edge)
+                _, leaf_name = current_binet.add_leaf_to_edge(edge)
                 extra_leaf_dict[leaf_name] = edge
-            current_trinet.prune()
-            if current_trinet.number_of_internals_leaves_reticulations()[2] != self.level:
+            current_binet.prune()
+            if current_binet.number_of_internals_leaves_reticulations()[2] != self.level:
                 continue
-            trinet_info = TrinetInfo(current_trinet, {'generator'      : self, 'generator_name': self.name, 'reticulations': reticulations,
-                                                      'extra_leaf_dict': extra_leaf_dict, 'level': self.level, 'symmetrical_nodes': self.symmetrical_nodes})
-            trinet_info_list.append(trinet_info)
-        return trinet_info_list
+            binet_info = NetworkInfo(current_binet, {'generator'      : self, 'generator_name': self.name, 'reticulations': reticulations,
+                                                     'extra_leaf_dict': extra_leaf_dict, 'level': self.level, 'symmetrical_nodes': self.symmetrical_nodes})
+            binet_info_list.append(binet_info)
+        return binet_info_list
 
     def __copy__(self):
         cls = self.__class__
@@ -112,19 +122,19 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
     def __deepcopy__(self, memo):
         cls = self.__class__
         cp = cls.__new__(cls)
-        cp.adj_matrix = copy.deepcopy(self.adj_matrix)
-        cp.node_name_map = copy.deepcopy(self.node_name_map)
-        cp.leaf_numbers = copy.deepcopy(self.leaf_numbers)
-        cp.number_of_nodes = copy.deepcopy(self.number_of_nodes)
-        cp.level = copy.deepcopy(self.level)
-        cp.dimension = copy.deepcopy(self.dimension)
+        cp.adj_matrix = copy.copy(self.adj_matrix)
+        cp.node_name_map = copy.copy(self.node_name_map)
+        cp.leaf_numbers = copy.copy(self.leaf_numbers)
+        cp.number_of_nodes = copy.copy(self.number_of_nodes)
+        cp.level = copy.copy(self.level)
+        cp.dimension = copy.copy(self.dimension)
         cp.uid = guid()
-        cp.name = copy.deepcopy(self.name)
+        cp.name = copy.copy(self.name)
         cp.symmetrical_nodes = copy.deepcopy(self.symmetrical_nodes)
         cp.logger = logging.getLogger('network.{}'.format(self.uid))
         cp._biconnected_components = copy.deepcopy(self._biconnected_components)
         cp._partial_ordering = copy.deepcopy(self._partial_ordering)
-        cp._cut_arc_matrix = copy.deepcopy(self._cut_arc_matrix)
+        cp._cut_arc_matrix = copy.copy(self._cut_arc_matrix)
         cp._cut_arc_sets = copy.deepcopy(self._cut_arc_sets)
         return cp
 

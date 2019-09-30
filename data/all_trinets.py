@@ -1,7 +1,10 @@
 import data.generators as generators
 import logging
 import pickle
-from datastructures.rooted_level_k_network import TrinetInfoList, TrinetInfo
+import itertools
+import time
+import copy
+from datastructures.rooted_level_k_network import TrinetInfoList, NetworkInfo, RootedLevelKNetwork
 
 
 def pickle_save(filename, data):
@@ -17,33 +20,57 @@ def pickle_read(filename):
     return result
 
 
-def regenerate_trinets() -> None:
+def regenerate_standard_networks() -> None:
     """Regenerate and save all possible trinets."""
     logging.debug("Regenerating all possible trinets and saving them.")
 
+    # All generators per level
     all_generators = {
         0: [generators.generator_level0]
         , 1: [generators.generator_level1]
         , 2: [generators.generator_A, generators.generator_B, generators.generator_C, generators.generator_D]
     }
 
-    trinet_info_list = TrinetInfoList()
+    # Get biconnected binets and trinets for each generator
+    biconnected_trinet_list = TrinetInfoList()
+    biconnected_binet_list = TrinetInfoList()
     for level, generator_list in all_generators.items():
         for generator in generator_list:
             generator_trinet_info_list = generator.build_trinets()
-            trinet_info_list.extend(generator_trinet_info_list)
+            generator_binet_info_list = generator.build_binets()
+            biconnected_trinet_list.extend(generator_trinet_info_list)
+            biconnected_binet_list.extend(generator_binet_info_list)
 
-    pickle_out = open("data/all_trinets_save.pickle", 'wb')
-    data = [all_generators, trinet_info_list]
+    biconnected_trinet_list.uniquify()
+    biconnected_binet_list.uniquify()
+
+    # From binets create trinets with two biconnected components
+    two_component_trinet_list = TrinetInfoList()
+    two_binet_infos_iterator = itertools.combinations(biconnected_binet_list, 2)
+    for binet_infos in two_binet_infos_iterator:
+        previous_two_component_trinet = None
+        for index, leaf_name in enumerate(binet_infos[0].network.leaf_names):
+            two_component_trinet = copy.deepcopy(binet_infos[0].network)
+            two_component_trinet.replace_leaf_with_network(leaf_name, binet_infos[1].network, replace_names=True)
+            if index == 0 or not two_component_trinet.equal_structure(previous_two_component_trinet):
+                two_component_trinet_list.append(NetworkInfo(two_component_trinet))
+            previous_two_component_trinet = two_component_trinet
+
+    two_component_trinet_list.extend(biconnected_trinet_list)
+    biconnected_trinet_list.extend(biconnected_binet_list)
+    two_component_trinet_list.uniquify()
+
+    pickle_out = open("data/all_networks_save.pickle", 'wb')
+    data = [all_generators, biconnected_trinet_list, two_component_trinet_list]
     pickle.dump(data, pickle_out)
     pickle_out.close()
 
 
-def get_trinets() -> (list, TrinetInfoList):
+def get_standard_networks() -> (list, TrinetInfoList):
     """Read and retrieve all possible trinets."""
     logging.debug("Reading and retrieving all possible trinets.")
-    pickle_in = open("data/all_trinets_save.pickle", 'rb')
+    pickle_in = open("data/all_networks_save.pickle", 'rb')
     result = pickle.load(pickle_in)
     pickle_in.close()
-    all_generators, trinet_info_list = result[0], result[1]
-    return all_generators, trinet_info_list
+    all_generators, biconnected_trinet_binet_list, all_trinet_list = result[0], result[1], result[2]
+    return all_generators, biconnected_trinet_binet_list, all_trinet_list

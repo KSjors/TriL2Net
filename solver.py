@@ -9,7 +9,7 @@ import time
 
 
 class Solver:
-    def __init__(self, standard_trinet_info_list, trinet_info_list: TrinetInfoList):
+    def __init__(self, standard_trinet_info_list, trinet_info_list: NetworkInfoList):
         self.uid = guid()
         self.logger_name = f"solver.{self.uid}"
         self.logger = logging.getLogger(self.logger_name)
@@ -24,7 +24,6 @@ class Solver:
         self.logger.info('Started solving')
         self.logger.info('Shrinking ...')
         while self.next_shrink():
-            # self.last_component.visualize()
             continue
         self.logger.info('Expanding ...')
         while self.expand_mss(self.last_component):
@@ -32,7 +31,7 @@ class Solver:
         self.logger.info('Finished solving')
         return self.last_component
 
-    def next_shrink(self, max_processes=1):
+    def next_shrink(self):
         self.logger.info("Performing the next shrink.")
         leaves_leftover = self.trinet_info_list.represented_leaves()
         self.logger.info(f"Leaves leftover are {leaves_leftover}")
@@ -43,8 +42,9 @@ class Solver:
         elif len(leaves_leftover) == 2:
             minimal_sink_sets = [leaves_leftover]
         else:
-            minimal_sink_sets = self.trinet_info_list.get_minimal_sink_sets(level=0)
-        self.logger.info(f"Minimal sink sets are {minimal_sink_sets}")
+            minimal_sink_sets, mss_score = self.trinet_info_list.get_minimal_sink_sets(level=0)
+            self.logger.info(f"Inconsistency: Score of minimal sink-set is {mss_score}")
+        self.logger.info(f"Minimal sink-sets are \n {pp.pformat(minimal_sink_sets)}")
         for minimal_sink_set in sorted(minimal_sink_sets, key=lambda x: len(x)):
             self.shrink_mss(minimal_sink_set)
         return True
@@ -54,38 +54,63 @@ class Solver:
 
         # Get underlying structure and level
         # Get trinets which describe sink set
-        trinet_info_list_mss = self.trinet_info_list.find_trinets_with_leaf_names_in(minimal_sink_set)
+        trinet_info_list_mss = self.trinet_info_list.find_networks_with_leaf_names_in(minimal_sink_set)
         self.logger.info(f"Number of trinets for this mss is {len(trinet_info_list_mss)}")
         trinet_info_list_mss.add_info(self.standard_trinet_info_list)
+
         if len(minimal_sink_set) == 2:
-            trinet_info_list_mss.calculate_info()
+            # TODO: count occurences and pick most used
+            trinet_info_list_mss.uniquify(equal_naming=True)
+            generator = trinet_info_list_mss[0].network
+            mss_name = mss_leaf_name(minimal_sink_set)
+            self.last_component = generator
+            self.components[mss_name] = generator
+            self.transformations[mss_name] = minimal_sink_set
+            self.trinet_info_list.shrink(minimal_sink_set)
+            self.trinet_info_list.calculate_info()
+            return
 
         # Get trinets with information
-        trinet_info_list_mss = trinet_info_list_mss.trinets_with_category('relation_dict')
+
+        trinet_info_list_mss = trinet_info_list_mss.networks_with_category('strict_level')
+        trinet_info_list_mss = trinet_info_list_mss.networks_of_size(3)
+        # TODO: return counts ?
+        trinet_info_list_mss.uniquify(equal_naming=True)
+        self.logger.info(f"Number of unique trinets for this mss is {len(trinet_info_list_mss)}")
 
         # Find level and generator
-        level = trinet_info_list_mss.max_level()
-        trinet_info_list_mss_gen_level = trinet_info_list_mss.trinets_where('level', level)
+        best_level, best_level_score = trinet_info_list_mss.best_level()
+        self.logger.info(f"Best level is {best_level}")
+        self.logger.info(f"Inconsistency: score of level is {best_level_score}")
+        trinet_info_list_mss_level = trinet_info_list_mss.networks_where('strict_level', best_level)
+        trinet_info_list_mss_gen_level = trinet_info_list_mss_level.networks_with_category('generator_name')
+        # TODO: ERROR --> IT CAN HAPPEN THAT THERE ARE NO TRINETS LEFT DUE TO MSS INCONSISTENCY
+        #  e.g. : data/error_networks/mss_inconsistency.pickle
+        self.logger.info(f"Level of underlying generator of minimal sink-set is {best_level}")
 
-        self.logger.info(f"Level of underlying generator of minimal sink-set is {level}")
+        if len(trinet_info_list_mss_gen_level) == 0:
+            for network_info in trinet_info_list_mss:
+                network_info.network.visualize()
 
-        if level == 0:
-            generator = copy.deepcopy(trinet_info_list_mss_gen_level[0].trinet)
+        if best_level == 0:
+            generator = copy.deepcopy(trinet_info_list_mss_gen_level[0].network)
             self.logger.info(f"Generator of underlying generator of minimal sink-set is 0")
-        elif level >= 1:
+        elif best_level >= 1:
             generator = trinet_info_list_mss_gen_level.best_generator()
             self.logger.info(f"Generator of underlying generator of minimal sink-set is {generator.name}")
 
             # Get information about placement of leaves on sides
             # Get trinets with this generator and find on which side each leaf is
-            trinet_info_list_mss_gen_level_gen = trinet_info_list_mss_gen_level.trinets_where('generator_name', generator.name)
-            edge_leaf_dict, reticulation_names = trinet_info_list_mss_gen_level_gen.get_leaf_locations()
+            trinet_info_list_mss_gen_level_gen = trinet_info_list_mss_gen_level.networks_where('generator_name', generator.name)
+            edge_leaf_dict, reticulation_names, leaf_location_score = trinet_info_list_mss_gen_level_gen.get_leaf_locations()
+            self.logger.info(f"Inconsistency: score of leaf locations is {leaf_location_score}")
 
-            self.logger.info(f"Found that the leaves are on the edges as follows {pp.pformat(edge_leaf_dict)}")
-            self.logger.info(f"Found that the reticulations in the generator should be renamed as follows {pp.pformat(reticulation_names)}")
+            self.logger.info(f"Found that the leaves are on the edges as follows \n {pp.pformat(edge_leaf_dict)}")
+            self.logger.info(f"Found that the reticulations in the generator should be renamed as follows \n {pp.pformat(reticulation_names)}")
 
             # Get trinets of level-1 for ordering of leaf on sides
-            trinet_info_list_mss_level_1_2 = trinet_info_list_mss.trinets_where('level', 1) + trinet_info_list_mss.trinets_where('level', 2)
+            trinet_info_list_mss = trinet_info_list_mss.networks_with_category('relation_dict')
+            trinet_info_list_mss_level_1_2 = trinet_info_list_mss.networks_where('strict_level', 1) + trinet_info_list_mss.networks_where('strict_level', 2)
             leaf_set, leaf_order_matrix_1 = trinet_info_list_mss_level_1_2.leaf_order_info()
 
             # Remove symmetries
@@ -231,8 +256,7 @@ class Solver:
             sub_leaf_set[new_index] = leaf_set[leaf_index]
         return sub_matrix, sub_leaf_set
 
-    @staticmethod
-    def order_leaves(leaf_set, leaf_order_matrix, sides=1):
+    def order_leaves(self, leaf_set, leaf_order_matrix, sides=1):
         assert sides in (1, 2), "Only works for 1 or 2 sides"
         side_orders = ([[] for _ in range(sides)])
         placed_leaves = []
@@ -259,8 +283,9 @@ class Solver:
                 side_alignment_1 = np.zeros(sides)
                 divide_boolean = True
                 for side in range(sides):
-                    side_alignment_1[side] += (len(placed_leaves) - len(side_orders[side])) \
-                                              - (sum(side_alignment) - side_alignment[side])
+                    other_side = (side+1)%sides
+                    side_alignment_1[side] = side_alignment[side] + len(side_orders[other_side]) - side_alignment[other_side]
+
                     if len(side_orders[side]) == 0:
                         divide_boolean = False
 
@@ -268,7 +293,7 @@ class Solver:
                     for side in range(sides):
                         side_alignment_1 /= len(side_orders[side])
 
-                best_side = np.argmax(side_alignment_1)
+                best_side = int(np.argmax(side_alignment_1))
                 side_orders[best_side].append(current_leaf)
                 placed_leaves.append(current_leaf)
 

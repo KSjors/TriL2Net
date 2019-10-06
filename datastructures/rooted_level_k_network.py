@@ -15,6 +15,7 @@ from bidict import bidict
 from graphviz import Digraph
 from utils.help_functions import *
 from tarjan import tarjan
+import math
 import time
 import os
 import pprint
@@ -135,7 +136,7 @@ class RootedLevelKNetwork:
         return new_network
 
     @classmethod
-    def from_dir_adj_matrix(cls, dir_adj_matrix: np.ndarray, level=2, dimension=2, check_valid=True):
+    def from_dir_adj_matrix(cls, dir_adj_matrix: np.ndarray, level=2, dimension=2, check_valid=True, char_type='alph'):
         """Create network from directed adjacency matrix. Assumes only internal nodes have rows. Other nodes are leaves."""
         logging.debug("Creating network from directed adjacency matrix.")
         shape = dir_adj_matrix.shape
@@ -144,7 +145,7 @@ class RootedLevelKNetwork:
         adj_matrix[:shape[1], :shape[0]] -= dir_adj_matrix.T
         node_name_map = bidict()
         leaf_names = list()
-        ln_iterator = leaf_name_iterator(1, 100)
+        ln_iterator = leaf_name_iterator(1, 100, char_type=char_type)
         for i in range(shape[1]):
             if i < shape[0]:
                 node_name_map.put(str(i), i)
@@ -396,23 +397,20 @@ class RootedLevelKNetwork:
         self._remove_node_from_dict(node_number)
         self.number_of_nodes -= 1
 
-        self._biconnected_components = None
-        self._partial_ordering = None
-        self._cut_arc_matrix = None
-        self._cut_arc_sets = None
+        self.reset_optimization_variables()
 
     def _remove_component(self, component: list) -> None:
         """Remove all nodes in component."""
         for node_number in sorted(component, reverse=True):
             self._remove_node_from_network(node_number=node_number, force=True)
 
-    def _add_node_to_dict(self, node_name: str = None, leaf=False) -> (str, int):
+    def _add_node_to_dict(self, node_name: str = None, leaf=False, char_type='alph') -> (str, int):
         """Add internal node to node_names dictionary. Returns its number."""
 
         # Get next number, and get a node_name if no name is given
         node_number = self.number_of_nodes
         if leaf:
-            node_name = self.first_unused_leaf_name() if node_name is None else node_name
+            node_name = self.first_unused_leaf_name(char_type) if node_name is None else node_name
         else:
             node_name = self.first_unused_internal_name() if node_name is None else node_name
 
@@ -428,11 +426,11 @@ class RootedLevelKNetwork:
         h = np.zeros((self.number_of_nodes + 1, 1))
         self.adj_matrix = np.concatenate((self.adj_matrix, h), axis=1)
 
-    def _add_node_to_network(self, node_name: str = None, leaf: bool = False) -> (str, int):
+    def _add_node_to_network(self, node_name: str = None, leaf: bool = False, char_type='alph') -> (str, int):
         """Add internal node to network."""
         self.logger.debug("Adding internal node to network.")
 
-        node_name, node_number = self._add_node_to_dict(node_name, leaf=leaf)
+        node_name, node_number = self._add_node_to_dict(node_name, leaf=leaf, char_type=char_type)
         self._add_node_to_adj_matrix()
 
         # Update numbers
@@ -472,16 +470,16 @@ class RootedLevelKNetwork:
         """Remove leaf with name node_name"""
         self.leaf_numbers.append(node_number)
 
-    def add_leaf_to_edge(self, edge, leaf_name: str = None) -> (str, str):
+    def add_leaf_to_edge(self, edge, leaf_name: str = None, char_type='alph') -> (str, str):
         """Add node between parent and child and attach leaf with leaf_name to it."""
-        return self.get_node_names_of(list(self._add_leaf_to_edge(self.get_node_numbers_of(edge), leaf_name)))
+        return self.get_node_names_of(list(self._add_leaf_to_edge(self.get_node_numbers_of(edge), leaf_name, char_type)))
 
-    def _add_leaf_to_edge(self, edge, leaf_name: str = None) -> (int, int):
+    def _add_leaf_to_edge(self, edge, leaf_name: str = None, char_type='alph') -> (int, int):
         parent = edge[0]
         child = edge[1]
 
         internal_name, internal_number = self._add_node_to_network()
-        leaf_name, leaf_number = self._add_node_to_network(leaf_name, leaf=True)
+        leaf_name, leaf_number = self._add_node_to_network(leaf_name, leaf=True, char_type=char_type)
 
         self._remove_connection(parent, child)
 
@@ -533,29 +531,29 @@ class RootedLevelKNetwork:
         self._add_connection(leaf_number_to_split, left_leaf_number)
         self._add_connection(leaf_number_to_split, right_leaf_number)
 
-    def replace_leaf_with_network(self, leaf_name_to_replace: str, replacement_network, replace_names: bool = False):
+    def replace_leaf_with_network(self, leaf_name_to_replace: str, replacement_network, replace_names: bool = False, char_type='alph'):
         assert self.is_leaf_node(leaf_name_to_replace), f"Cannot replace leaf {leaf_name_to_replace} with network as it is not a leaf."
         assert replace_names or set(self.leaf_names).isdisjoint(
             replacement_network.leaf_names), f"Cannot replace leaf {leaf_name_to_replace} with network \n \n {replacement_network}  \n \n as it has some leafs same as \n \n {self}"
         leaf_number_to_replace = self.get_node_number_of(leaf_name_to_replace)
-        return self._replace_leaf_with_network(leaf_number_to_replace, replacement_network, replace_names)
+        return self._replace_leaf_with_network(leaf_number_to_replace, replacement_network, replace_names, char_type)
 
-    def _replace_leaf_with_network(self, leaf_number_to_replace: int, replacement_network, replace_names: bool = False):
+    def _replace_leaf_with_network(self, leaf_number_to_replace: int, replacement_network, replace_names: bool = False, char_type='alph'):
         replacement_network = copy.deepcopy(replacement_network)
         replacement_network_internal_node_names = set(replacement_network.internal_node_names)
-        replacement_network_root_name = replacement_network.get_root_name()
+        replacement_network_root_name = replacement_network.get_root()
 
         # Add internal nodes from replacement network to current network with primed names
         for node_name in replacement_network.internal_node_names:
-            self._add_node_to_network(node_name + "*", leaf=False)
+            self._add_node_to_network(node_name + "*", leaf=False, char_type=char_type)
 
         # Add leaves from replacement network to current network
         if replace_names:
             for leaf_name in replacement_network.leaf_names:
-                self._add_node_to_network(leaf_name + "*", leaf=True)
+                self._add_node_to_network(leaf_name + "*", leaf=True, char_type=char_type)
         else:
             for leaf_name in replacement_network.leaf_names:
-                self._add_node_to_network(leaf_name, leaf=True)
+                self._add_node_to_network(leaf_name, leaf=True, char_type=char_type)
 
         # Replace leaf_name with root of replacement network
         parent_of_leaf = self._get_in_nodes_node(leaf_number_to_replace)[0]
@@ -572,7 +570,7 @@ class RootedLevelKNetwork:
                 self._add_connection(internal_node_number, self.get_node_number_of(to_node_name))
 
         if replace_names:
-            self.standardize_node_names()
+            self.standardize_node_names(char_type)
 
     def first_unused_internal_name(self) -> str:
         """Find first unused leaf name in numerical order."""
@@ -604,30 +602,19 @@ class RootedLevelKNetwork:
         assert leaf_name is not None, "Could not find a leaf name."
         return leaf_name
 
-    def get_root_number(self) -> int:
-        """Retrieve the number of the root"""
-        col_sum = sum(self.adj_matrix > 0)
-        roots = np.where(col_sum == 0)[0]
-        return roots[0]
+    def _get_root(self) -> int:
+        return np.where(sum(self.adj_matrix > 0) == 0)[0][0]
 
-    def get_root_name(self) -> str:
+    def get_root(self) -> str:
         """Retrieve the name of the root."""
-        self.logger.debug("Retrieving name of root node.")
-        col_sum = sum(self.adj_matrix > 0)
-        roots = np.where(col_sum == 0)[0]
-        return self.get_node_name_of(roots[0])
+        return self.get_node_name_of(self._get_root())
 
     def get_reticulations(self) -> list:
         """Retrieve node names of all reticulations."""
-        self.logger.debug("Retrieving names of all reticulations.")
-        in_degrees = np.array(self.get_in_degrees())
-        reticulations = list(np.where(in_degrees > 1)[0])
-        return self.get_node_names_of(reticulations)
+        return self.get_node_names_of(self._get_reticulations())
 
-    def get_leaves(self) -> list:
-        """Retrieve node names of all leaves."""
-        self.logger.debug("Retrieving names of all leaves.")
-        return self.leaf_numbers
+    def _get_reticulations(self) -> list:
+        return list(np.where(np.array(self.get_in_degrees()) > 1)[0])
 
     # ---------------------------------------------------------------- DEGREE METHODS ---------------------------------------------------------------- #
     def get_in_degree_node(self, node_name: str, leafless: bool = False) -> int:
@@ -772,7 +759,7 @@ class RootedLevelKNetwork:
 
     def get_connected_components(self, leafless: bool = False) -> list:
         """Retrieve the connected components (excluding leaves) of the network."""
-        connected_components = self._get_connections_node(leafless)
+        connected_components = self._get_connected_components(leafless)
         return [self.get_node_names_of(connected_component) for connected_component in connected_components]
 
     def _get_connected_components(self, leafless: bool = False) -> list:
@@ -847,6 +834,24 @@ class RootedLevelKNetwork:
             return [[node_number for node_number in cut_arc_set if self._is_leaf_node(node_number)] for cut_arc_set in self._cut_arc_sets]
         return self._cut_arc_sets
 
+    @property
+    def cut_arc_matrix_old(self) -> np.ndarray:
+        if self._cut_arc_matrix is None:
+            self._cut_arc_matrix = np.zeros((self.number_of_nodes, self.number_of_nodes))
+            edges = self._get_edges()
+            for edge in edges:
+                from_node, to_node = edge
+                self.adj_matrix[from_node][to_node] -= 1
+                self.adj_matrix[to_node][from_node] += 1
+                components = self.get_connected_components()
+                if len(components) > 1:
+                    self._cut_arc_matrix[from_node][to_node] = 1
+                    self._cut_arc_matrix[to_node][from_node] = 1
+                self.adj_matrix[from_node][to_node] += 1
+                self.adj_matrix[to_node][from_node] -= 1
+        return self._cut_arc_matrix
+
+    # TODO fix this
     @property
     def cut_arc_matrix(self) -> np.ndarray:
         """Compute indicator matrix for arcs which are cut-arcs."""
@@ -1072,12 +1077,12 @@ class RootedLevelKNetwork:
         self.logger.debug("Retrieving all exhibited trinets.")
 
         leaves = self.leaf_numbers
-        trinet_info_list = TrinetInfoList()
+        trinet_info_list = NetworkInfoList(network_size=3)
         total = int(scipy.special.comb(len(leaves), 3))
         triplets = list(itertools.combinations(leaves, 3))
 
         pool = multiprocessing.Pool(max_processes)
-        trinet_info_list = TrinetInfoList()
+        trinet_info_list = NetworkInfoList(network_size=3)
         if progress_bar:
             for x in tqdm(pool.imap_unordered(self._exhibited_trinets_helper, triplets), total=total):
                 trinet_info_list.append(x)
@@ -1092,13 +1097,35 @@ class RootedLevelKNetwork:
         result = NetworkInfo(self.trinet_from_network(self, node_numbers=list(triplet)))
         return result
 
+    def get_exhibited_trees(self):
+        reticulation_numbers = sorted(self._get_reticulations())
+        new_networks = [copy.deepcopy(self)]
+        while reticulation_numbers:
+            old_networks = new_networks
+            new_networks = []
+            current_reticulation_number = reticulation_numbers.pop(-1)
+            parents_current_reticulation = self._get_parents(children_numbers=set(current_reticulation_number), max_height=1).difference(
+                current_reticulation_number)
+            for current_parent in parents_current_reticulation:
+                for old_network in old_networks:
+                    new_network = copy.deepcopy(old_network)
+                    new_network._remove_connection(current_parent, current_reticulation_number)
+                    new_networks.append(new_network)
+
+        network_info_list = NetworkInfoList(network_size=len(self.leaf_numbers))
+        for network in new_networks:
+            network.prune()
+            network_info_list.append(network)
+        network_info_list.uniquify()
+        return network_info_list
+
     @property
     def partial_ordering(self) -> list:
         return [self.get_node_names_of(partial_ordering) for partial_ordering in self._get_partial_ordering()]
 
     def _get_partial_ordering(self) -> list:
         if self._partial_ordering is None:
-            root = self.get_root_number()
+            root = self._get_root()
             if self._is_leaf_node(root):
                 self._partial_ordering = [[]]
                 return self._partial_ordering
@@ -1319,8 +1346,8 @@ class RootedLevelKNetwork:
         else:
             pbar = None
         queue = multiprocessing.Queue()
-        self_root = self.get_root_number()
-        other_root = other.get_root_number()
+        self_root = self._get_root()
+        other_root = other._get_root()
         translation_dict = bidict()
         translation_dict[self_root] = other_root
         # process = multiprocessing.Process(self._equal_structure, kwargs={'self_current_node': self_root, 'other': other, 'other_current_node': other_root,
@@ -1345,6 +1372,8 @@ class RootedLevelKNetwork:
             pbar.n = max([len(translation_dict) for translation_dict in translation_dicts])
             pbar.refresh()
         if self._is_leaf_node(self_current_node) and other._is_leaf_node(other_current_node):
+            if equal_naming and self.get_node_name_of(self_current_node) != other.get_node_name_of(other_current_node):
+                return []  # False
             for translation_dict in translation_dicts:
                 if len(translation_dict) == self.number_of_nodes:
                     return [translation_dict]
@@ -1490,7 +1519,7 @@ class RootedLevelKNetwork:
         self.standardize_node_names()
 
     def enewick(self):
-        return self._enewick(self.get_root_number())
+        return self._enewick(self._get_root())
 
     def _enewick(self, current_node, traversed_nodes=None):
         traversed_nodes = coalesce(traversed_nodes, [])
@@ -1535,6 +1564,7 @@ class NetworkInfo:
     def calculate_info(self):
         self['cut_arc_sets'] = self.network.cut_arc_sets
         self['strict_level'] = self.network.strict_level()
+        self['leaf_order'] = self.network.get_leaf_ordering()
 
     def add_info(self, network_info):
         for key, value in network_info.info.items():
@@ -1591,28 +1621,58 @@ class NetworkInfoList:
                 result.append(NetworkInfo(network))
         return result
 
-    def uniquify(self):
+    def uniquify(self, equal_naming=False):
         indici_to_remove = set()
-        for index_1, network_info in enumerate(self):
-            for index_2, network_info_2 in enumerate(self[index_1+1:]):
-                 equal_structure, _, _ = network_info.network.equal_structure(network_info_2.network)
-                 if equal_structure:
-                    indici_to_remove.add(index_1+index_2+1)
+        for index_1, network_info_1 in enumerate(self):
+            if index_1 in indici_to_remove:
+                continue
+            for index_2, network_info_2 in enumerate(self[index_1 + 1:]):
+                equal_structure, _, _ = network_info_1.network.equal_structure(network_info_2.network, equal_naming=equal_naming)
+                if equal_structure:
+                    indici_to_remove.add(index_1 + index_2 + 1)
 
-        for index_1 in sorted(list(indici_to_remove), reverse=True):
-            self.pop(index_1)
+        for index in sorted(list(indici_to_remove), reverse=True):
+            self.pop(index)
 
-    def replace_distort(self, replacement_chance, network_pool):
-        assert 0 <= replacement_chance <= 1, "Replacement chance must be between 0 and 1"
-        for index, network_info in enumerate(self):
-            if np.random.uniform(size=1) <= replacement_chance:
-                replacement_network = copy.deepcopy(np.random.choice(network_pool))
-                for (old_name, new_name) in zip(replacement_network.network.leaf_names, network_info.network.leaf_names):
-                    replacement_network.network.rename_node(old_name, new_name)
-                self[index] = replacement_network
+    def replace_network_distort(self, prob, network_pool):
+        assert 0 <= prob <= 1, "Probability must be between 0 and 1"
+        amount = np.random.binomial(len(self), prob)
+        networks_to_distort = np.random.choice(range(len(self)), amount, replace=False)
+        for index in networks_to_distort:
+            replacement_network = copy.deepcopy(np.random.choice(network_pool))
+            replacement_network.network.standardize_node_names(char_type='uid')
+            for (old_name, new_name) in zip(replacement_network.network.leaf_names, self[index].network.leaf_names):
+                replacement_network.network.rename_node(old_name, new_name)
+            self[index] = replacement_network
 
-    def alter_distort(self, move_leaf_chance, switch_leaf_chance):
-        pass
+    def move_leaf_distort(self, prob):
+        assert 0 <= prob <= 1, "Probability must be between 0 and 1"
+        amount = np.random.binomial(len(self), prob)
+        networks_to_distort = np.random.choice(range(len(self)), amount, replace=False)
+        for index in networks_to_distort:
+            leaf_to_move = np.random.choice(self[index].network.leaf_names)
+            self[index].network.remove_leaf(leaf_to_move)
+            edges = self[index].network.get_edges()
+            edge_to_add_leaf_to_index = np.random.choice(range(len(edges)))
+            edge_to_add_leaf_to = edges[edge_to_add_leaf_to_index]
+            self[index].network.add_leaf_to_edge(edge_to_add_leaf_to, leaf_to_move)
+
+    def switch_leaves_distort(self, prob):
+        assert 0 <= prob <= 1, "Probability must be between 0 and 1"
+        amount = np.random.binomial(len(self), prob)
+        networks_to_distort = np.random.choice(range(len(self)), amount, replace=False)
+        for index in networks_to_distort:
+            leaves_to_switch = np.random.choice(self[index].network.leaf_names, size=2, replace=False)
+            self[index].network.rename_node(leaves_to_switch[0], leaves_to_switch[0] + "*")
+            self[index].network.rename_node(leaves_to_switch[1], leaves_to_switch[0])
+            self[index].network.rename_node(leaves_to_switch[0] + "*", leaves_to_switch[1])
+
+    def remove_network_distort(self, prob):
+        assert 0 <= prob <= 1, "Probability must be between 0 and 1"
+        amount = np.random.binomial(len(self), prob)
+        networks_to_distort = np.random.choice(range(len(self)), amount, replace=False)
+        for index in sorted(networks_to_distort, reverse=True):
+            self.pop(index)
 
     def _analyse_networks(self, all_taxa) -> (dict, float, float, float):
         n_set_iterator = itertools.combinations(all_taxa, self.network_size)
@@ -1626,15 +1686,16 @@ class NetworkInfoList:
                 networks = [network_count['network'] for network_count in covered_networks[taxa]]
             except KeyError:
                 continue  # In case taxa is not in covered_networks. Happens when there are extra_taxa
-            for index, trinet in enumerate(networks):
-                if network_info.network.equal_structure(trinet, equal_naming=True):
+            for index, network in enumerate(networks):
+                equal, _, _ = network_info.network.equal_structure(network, equal_naming=True)
+                if equal:
                     covered_networks[taxa][index]['count'] += 1
                     break
             else:
                 covered_networks[taxa].append({'network': network_info.network, 'count': 1})
 
-        unique_networks = 0
-        unique_n_sets = 0
+        unique_networks = 0.
+        unique_n_sets = 0.
         for taxa, network_counts in covered_networks.items():
             l = len(network_counts)
             unique_networks += l
@@ -1665,7 +1726,7 @@ class NetworkInfoList:
             f"        {extra_taxa} \n" \
             f" - completely misses taxa: \n" \
             f"        {missing_taxa} \n" \
-            f" - and {len(self)} trinets \n"
+            f" - and {len(self)} networks of size {self.network_size} \n"
 
         summary += f" - redundancy = {redundancy} \n" \
                    f" - density = {density} \n" \
@@ -1674,7 +1735,7 @@ class NetworkInfoList:
                    f" - consistent = {bool(redundancy == 0.0 and density == 1.0 and inconsistency_0 == 0.0 and inconsistency_1 == 0.0)}"
 
         if per_network:
-            per_network_summary = "taxa - [ network - count | ... | trinet - count ] \n"
+            per_network_summary = "taxa - [ network - count | ... | network - count ] \n"
             for taxa, network_counts in covered_networks.items():
                 current_network_summary = [str(network_counts['network'].uid) + " - " + str(network_counts['count']) for network_counts in network_counts]
                 per_network_summary += f"{taxa} : {'|'.join(current_network_summary)} \n"
@@ -1699,23 +1760,23 @@ class NetworkInfoList:
 
     def add_info(self, network_info_list):
         for network_info in self:
-            equal_structured_trinets, relation_dicts = network_info_list.find_equal_structured_trinet(network_info.trinet)
+            equal_structured_networks, relation_dicts = network_info_list.find_equal_structured_network(network_info.network)
             # TODO check if two?
             try:
-                equal_structured_trinet = equal_structured_trinets[0]
-                network_info.add_info(equal_structured_trinet)
+                equal_structured_network = equal_structured_networks[0]
+                network_info.add_info(equal_structured_network)
                 network_info['relation_dict'] = relation_dicts[0]
-                network_info['leaf_order'] = network_info.trinet.get_leaf_ordering()
+                network_info['leaf_order'] = network_info.network.get_leaf_ordering()
             except IndexError:
-                pass
+                network_info.calculate_info()
 
     def shrink(self, leaf_set):
         to_remove = []
-        for trinet_info in self:
-            if not trinet_info.shrink(leaf_set):
-                to_remove.append(trinet_info)
-        for trinet_info in to_remove:
-            self.remove(trinet_info)
+        for network_info in self:
+            if not network_info.shrink(leaf_set):
+                to_remove.append(network_info)
+        for network_info in to_remove:
+            self.remove(network_info)
 
     def append(self, other):
         assert type(other) == NetworkInfo, "Can only add object of type NetworkInfo to a NetworkInfoList"
@@ -1728,10 +1789,10 @@ class NetworkInfoList:
             self.append(o)
 
     def find_equal_structured_network(self, network):
-        result = NetworkInfoList()
+        result = NetworkInfoList(network_size=self.network_size)
         relation_dicts = []
         for network_info in self:
-            are_equal, relation_dict, leaf_translation_dicts = network_info.trinet.equal_structure(network, optimize=True)
+            are_equal, relation_dict, leaf_translation_dicts = network_info.network.equal_structure(network, optimize=True)
             if are_equal:
                 result.append(network_info)
                 relation_dicts.append(leaf_translation_dicts[0])
@@ -1755,34 +1816,42 @@ class NetworkInfoList:
                 return True
         return False
 
-    def remove_trinet_by_leaf_names(self, leaf_names):
+    def remove_network_by_leaf_names(self, leaf_names):
         network_infos = self.find_network_by_leaf_names(leaf_names)
         for network_info in network_infos:
             self.remove(network_info)
         return network_infos
 
     def find_networks_with_leaf_names_in(self, leaf_names):
-        result = NetworkInfoList()
+        result = NetworkInfoList(network_size=self.network_size)
         # if len(leaf_names) > 2:
         #     for trinet_info in self:
         #         if set(trinet_info.trinet.leaf_names).issubset(leaf_names):
         #             result.append(trinet_info)
         for network_info in self:
-            if set(leaf_names).issubset(network_info.trinet.leaf_names):
-                result.append(NetworkInfo.limit_to(network_info, leaf_names))
+            overlap = set(leaf_names).intersection(network_info.network.leaf_names)
+            if len(overlap) >= 2:
+                result.append(NetworkInfo.limit_to(network_info, list(overlap)))
         return result
 
     def networks_where(self, category, value):
-        result = NetworkInfoList()
+        result = NetworkInfoList(network_size=self.network_size)
         for network_info in self:
             if network_info[category] == value:
                 result.append(network_info)
         return result
 
     def networks_with_category(self, category):
-        result = NetworkInfoList()
+        result = NetworkInfoList(network_size=self.network_size)
         for network_info in self:
             if category in network_info.info.keys():
+                result.append(network_info)
+        return result
+
+    def networks_of_size(self, size):
+        result = NetworkInfoList(network_size=size)
+        for network_info in self:
+            if len(network_info.network.leaf_numbers) == size:
                 result.append(network_info)
         return result
 
@@ -1792,9 +1861,8 @@ class NetworkInfoList:
             result.update(network_info.network.leaf_names)
         return result
 
-    def get_minimal_sink_sets(self, level=0):
-        leaf_set = self.represented_leaves()
-        arc_count_dict = dict()
+    def weighted_auxiliary_digraph(self):
+        weighted_auxiliary_digraph = dict()
         for network_info in self:
             cut_arc_sets = network_info['cut_arc_sets']
             for cut_arc_set in cut_arc_sets:
@@ -1804,42 +1872,115 @@ class NetworkInfoList:
                     z = [Z for Z in network_info.network.leaf_names if Z not in cut_arc_set][0]
                     for i in (x, y):
                         try:
-                            arc_count_dict[(i, z)] += 1
+                            weighted_auxiliary_digraph[(i, z)] += 1
                         except KeyError:
-                            arc_count_dict[(i, z)] = 1
+                            weighted_auxiliary_digraph[(i, z)] = 1
+        return weighted_auxiliary_digraph
 
-        adjacency_dict = dict()
+    def auxiliary_digraph(self, weighted_auxiliary_digraph, level):
+        leaf_set = self.represented_leaves()
+        auxiliary_digraph = dict()
         arc_iterator = itertools.permutations(leaf_set, 2)
         for arc in arc_iterator:
+            weight = 0
             try:
-                count = arc_count_dict[arc]
+                weight = weighted_auxiliary_digraph[arc]
             except KeyError:
-                count = 0
-            if count <= level:
+                pass
+            if weight <= level:
                 try:
-                    adjacency_dict[arc[0]].add(arc[1])
+                    auxiliary_digraph[arc[0]].add(arc[1])
                 except KeyError:
-                    adjacency_dict[arc[0]] = {arc[1]}
+                    auxiliary_digraph[arc[0]] = {arc[1]}
+        return auxiliary_digraph
 
-        strongly_connected_components = tarjan(adjacency_dict)
+    def minimal_sink_set(self, strongly_connected_components, auxiliary_digraph):
         msss = []
         for strongly_connected_component in strongly_connected_components:
             for node in strongly_connected_component:
-                to_leaves = adjacency_dict[node]
-                if not set(to_leaves).issubset(strongly_connected_component):
-                    break
+                try:
+                    to_leaves = auxiliary_digraph[node]
+                    if not set(to_leaves).issubset(strongly_connected_component):
+                        break
+                except KeyError:
+                    pass
             else:
                 msss.append(strongly_connected_component)
+        return [mss for mss in msss if len(mss) > 1]
 
-        return [mss for mss in msss if len(mss) > 1]  # and len(mss) != len(leaf_set)
+    def get_minimal_sink_sets(self, level=0):
+        n = len(self.represented_leaves())
+        weighted_auxiliary_digraph = self.weighted_auxiliary_digraph()
+        auxiliary_digraph = self.auxiliary_digraph(weighted_auxiliary_digraph, level)
+        strongly_connected_components = tarjan(auxiliary_digraph)
+        msss = self.minimal_sink_set(strongly_connected_components, auxiliary_digraph)
+        while len(msss) == 0 and level <= n:
+            level += 1
+            auxiliary_digraph = self.auxiliary_digraph(weighted_auxiliary_digraph, level)
+            strongly_connected_components = tarjan(auxiliary_digraph)
+            msss = self.minimal_sink_set(strongly_connected_components, auxiliary_digraph)
+        score = 1 - level / min([len(mss) for mss in msss])
+        return msss, score
 
     def max_level(self):
-        level = 0
+        return max([0] + [network_info['strict_level'] for network_info in self])
+
+    def best_level(self, max_level: int = 2):
+        if max_level > 2:
+            self.logger.warning("This code is not intended to work for max_level > 2")
+        level_count = {level: 0 for level in range(max_level + 1)}
         for network_info in self:
-            level = max(level, network_info['level'])
-        return level
+            try:
+                level_count[network_info['strict_level']] += 1
+            except KeyError:  # when level is higher than max_level
+                pass
+
+        number_of_leaves = len(self.represented_leaves())
+        number_of_possible_networks = ncr(number_of_leaves, 3)
+        number_of_networks = len(self)
+        level_percentage = {level: count / number_of_networks for level, count in level_count.items()}
+        # TODO better naming and better boundaries
+
+        min_percentage_matrix = np.zeros((3, 3))
+        max_percentage_matrix = np.zeros((3, 3))
+        # Level 0
+        min_percentage_matrix[0][0] = 1.
+        max_percentage_matrix[0][0] = 1.
+
+        # Level 1
+        temp = ncr(number_of_leaves - 1, 2) / number_of_possible_networks
+        min_percentage_matrix[1][0] = 1 - temp
+        max_percentage_matrix[1][0] = 1 - temp
+        min_percentage_matrix[1][1] = temp
+        max_percentage_matrix[1][1] = temp
+
+        # Level 2
+        min_percentage_matrix[2][0] = min(
+            (ncr(int(math.ceil((number_of_leaves - 1) / 2.)), 3) + ncr(int(math.floor((number_of_leaves - 1) / 2.)), 3)),
+            ncr(number_of_leaves - 2, 3)
+        ) / number_of_possible_networks
+        max_percentage_matrix[2][0] = ncr(number_of_leaves - 1, 3) / number_of_possible_networks
+        min_percentage_matrix[2][2] = ncr(number_of_leaves - 2, 1) / number_of_possible_networks
+        max_percentage_matrix[2][2] = ncr(number_of_leaves - 1, 2) / number_of_possible_networks
+        min_percentage_matrix[2][1] = 1 - max_percentage_matrix[2][0] - max_percentage_matrix[2][2]
+        max_percentage_matrix[2][1] = 1 - min_percentage_matrix[2][0] - min_percentage_matrix[2][2]
+
+        shortage_matrix = np.zeros((3, 3))
+        surplus_matrix = np.zeros((3, 3))
+        for network_level in range(max_level + 1):
+            for trinet_level in range(3):
+                shortage_matrix[network_level][trinet_level] = max(0, min_percentage_matrix[network_level][trinet_level] - level_percentage[trinet_level])
+                surplus_matrix[network_level][trinet_level] = max(0, level_percentage[trinet_level] - max_percentage_matrix[network_level][trinet_level])
+
+        alginment_matrix = shortage_matrix + surplus_matrix
+        score_array = list(np.sum(alginment_matrix, axis=1))
+        best_level = score_array.index(min(score_array))
+        best_score = 1-score_array[best_level]
+
+        return best_level, best_score
 
     def best_generator(self):
+        # TODO: in case of draws/near draws, use same heuristics as in best_level
         generators = []
         generator_count = []
         for network_info in self:
@@ -1858,7 +1999,6 @@ class NetworkInfoList:
         leaf_set = bidict({leaf: index for leaf, index in enumerate(self.represented_leaves())})
         leaf_order_matrix = np.zeros((len(leaf_set), len(leaf_set)))
         for network_info in self:
-            # relation_dict = network_info['relation_dict'] # TODO why is this here?
 
             leaf_order = network_info['leaf_order']
             for leaf_ord in leaf_order:
@@ -1897,6 +2037,7 @@ class NetworkInfoList:
         cls = self.__class__
         cp = cls.__new__(cls)
         cp.list = copy.copy(self.list)
+        cp.network_size = copy.copy(self.network_size)
         cp.uid = guid()
         return cp
 
@@ -1904,6 +2045,7 @@ class NetworkInfoList:
         cls = self.__class__
         cp = cls.__new__(cls)
         cp.list = copy.deepcopy(self.list)
+        cp.network_size = copy.deepcopy(self.network_size)
         cp.uid = guid()
         return cp
 
@@ -1918,61 +2060,72 @@ class NetworkInfoList:
         self.logger = logging.getLogger(self.logger)
         return self.__dict__
 
-
-class TrinetInfoList(NetworkInfoList):
-    def __init__(self, lst: list = None):
-        super().__init__(3, lst)
-
     def get_leaf_locations(self):
-        leaf_set = copy.deepcopy(self.represented_leaves())
-        # Create: Leaf --> Edge --> (how many times leaf is on this edge)
-        leaf_on_edge_count_dict = {leaf: {} for leaf in leaf_set}
-        relation_dict_count = {leaf: {'A': 0, 'B': 0, 'C': 0} for leaf in leaf_set}
-        for trinet_info in self:
-            relation_dict = trinet_info['relation_dict']
-            for key, value in relation_dict.items():
-                relation_dict_count[value][key] += 1
-            for leaf, edge in trinet_info['extra_leaf_dict'].items():
+        assert self.network_size <= 3, "This method only works for trinet and binet sets"
+        # TODO: assert all networks have the same generator (? or use all trinets etc)
+        # TODO: For generators with symmetric reticulations leaves score will not be 100%
+        all_leaves = list(self.represented_leaves())
+        number_of_leaves = len(all_leaves)
+
+        # Leaf --> Edge --> (how many times leaf is on this edge)
+        all_edges = list(set(self[0]['generator'].get_edges(leafless=True)))
+        number_of_edges = len(all_edges)
+        leaf_on_edge_count_dict = {leaf: {edge: 0 for edge in all_edges} for leaf in all_leaves}
+        for network_info in self:
+            relation_dict = network_info['relation_dict']
+            extra_leaf_dict = network_info['extra_leaf_dict']
+            for leaf, edge in extra_leaf_dict.items():
                 translated_leaf = relation_dict[leaf]
-                try:
-                    leaf_on_edge_count_dict[translated_leaf][edge] += 1
-                except KeyError:
-                    leaf_on_edge_count_dict[translated_leaf][edge] = 1
+                leaf_on_edge_count_dict[translated_leaf][edge] += 1
+        # Put in matrix
+        leaf_on_edge_count_matrix = np.zeros((number_of_edges, number_of_leaves))
+        for leaf_index, leaf in enumerate(all_leaves):
+            for edge_index, edge in enumerate(all_edges):
+                leaf_on_edge_count_matrix[edge_index][leaf_index] = leaf_on_edge_count_dict[leaf][edge]
 
-        # Create: Edge --> (leaves which are on this edge)
-        edge_leaf_dict = dict()
-        for leaf, edge_count_dict in leaf_on_edge_count_dict.items():
-            try:
-                max_count = max(edge_count_dict.values())
-            except ValueError:
-                continue
-            best_edges = [edge for edge, count in edge_count_dict.items() if count == max_count]
-            best_edge = best_edges[0]
+        # Generator reticulation --> leaf --> (how many times leaf is this reticulation leaf}
+        generator_reticulations = list(self[0]['reticulations'])
+        number_of_reticulations = len(generator_reticulations)
+        leaf_is_reticulation_dict = {leaf: {ret: 0 for ret in generator_reticulations} for leaf in all_leaves}
+        for network_info in self:
+            relation_dict = network_info['relation_dict']
+            for generator_leaf, leaf in relation_dict.items():
+                if generator_leaf in generator_reticulations:
+                    leaf_is_reticulation_dict[leaf][generator_leaf] += 1
+        # Put in matrix
+        leaf_is_reticulation_matrix = np.zeros((number_of_reticulations, number_of_leaves))
+        for leaf_index, leaf in enumerate(all_leaves):
+            for reticulation_index, generator_reticulation in enumerate(generator_reticulations):
+                leaf_is_reticulation_matrix[reticulation_index][leaf_index] = leaf_is_reticulation_dict[leaf][generator_reticulation]
 
-            try:
-                edge_leaf_dict[best_edge].add(leaf)
-            except KeyError:
-                edge_leaf_dict[best_edge] = {leaf}
-            leaf_set.remove(leaf)
-            relation_dict_count.pop(leaf)
+        # Create simplex problem
+        cost_matrix = np.vstack((leaf_on_edge_count_matrix, leaf_is_reticulation_matrix))
+        for j in range(number_of_leaves):
+            norm = sum(cost_matrix[:, j])
+            if norm != 0:
+                cost_matrix[:, j] /= norm
 
-        # TODO: Need to keep n (=number of reticulations in generator) in relation_dict
-        #  Choose the ones which are the least number of times on a side
+        cost_array = cost_matrix.flatten()
+        eye_list = [np.eye(number_of_leaves) for _ in range(number_of_reticulations + number_of_edges)]
+        constraint_matrix_p1 = np.hstack(eye_list)
+        constraint_matrix_p2 = np.zeros((number_of_reticulations, number_of_leaves * (number_of_reticulations + number_of_edges)))
+        for i in range(number_of_edges, number_of_edges + number_of_reticulations):
+            for j in range(number_of_leaves * i, number_of_leaves * (i + 1)):
+                constraint_matrix_p2[i - number_of_edges][j] = 1
+        constraint_matrix = np.vstack((constraint_matrix_p1, constraint_matrix_p2))
+        b_array = [1] * (number_of_leaves + number_of_reticulations)
 
-        # Find which reticulation is which
-        reticulation_relation_dict = {reticulation: set() for reticulation in relation_dict_count}
-        for reticulation, counts in relation_dict_count.items():
-            m = max(counts.values())
-            for option, count in counts.items():
-                if count == m:
-                    reticulation_relation_dict[reticulation].add(option)
+        solution, score = simplex_to_ILP(c=cost_array, A_eq=constraint_matrix, b_eq=b_array)
 
-        # TODO: Make sure that it is not possible that options is empty before a valid reticulation is found
-        chosen_reticulation_relation_dict = dict()
-        for reticulation, options in reticulation_relation_dict.items():
-            current_choice = options.pop()
-            while current_choice in chosen_reticulation_relation_dict.values():
-                current_choice = options.pop()
-            chosen_reticulation_relation_dict[reticulation] = current_choice
+        solution = np.where(np.array(solution) == 1.0)[0]
+        assert len(solution) == number_of_leaves
+        edge_leaf_dict = {edge: [] for edge in all_edges}
+        chosen_reticulation_relation_dict = {}
+        for index in solution:
+            part = int(index / number_of_leaves)
+            if part < number_of_edges:
+                edge_leaf_dict[all_edges[part]].append(all_leaves[index % number_of_leaves])
+            else:
+                chosen_reticulation_relation_dict[all_leaves[index % number_of_leaves]] = generator_reticulations[part - number_of_edges]
 
-        return edge_leaf_dict, chosen_reticulation_relation_dict
+        return edge_leaf_dict, chosen_reticulation_relation_dict, score / number_of_leaves

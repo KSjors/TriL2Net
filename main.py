@@ -18,7 +18,7 @@ import logging
 #  -- WRITE --
 
 
-logging_level = logging.WARNING
+logging_level = logging.INFO
 # set up logging to file - see previous section for more details
 logging.basicConfig(level=logging_level,
                     format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
@@ -42,7 +42,7 @@ logging.getLogger('network').addHandler(fh)
 
 import os
 import data.test_networks as test_networks
-from datastructures.rooted_level_k_network import RootedLevelKNetwork, TrinetInfoList
+from datastructures.rooted_level_k_network import RootedLevelKNetwork, NetworkInfoList
 from solver import Solver
 import data.generators as generator
 from data.all_trinets import get_standard_networks, regenerate_standard_networks, pickle_save, pickle_read
@@ -51,63 +51,105 @@ import timeit
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import scipy.stats as stats
+from mip import model
 
 if __name__ == '__main__':
-    rebuild = {
-        'generators': 1
-        , 'network' : 0
-        , 'trinets' : 0
+    config = {
+        'rebuild_generators': 0
+        , 'rebuild_network' : 0
+        , 'network_config'  : {
+            'build_type'       : 'evolve'
+            # dict, enewick, evolve
+            , 'base_net_dict'  : test_networks.connections_big
+            , 'enewick'        : '(a, b)0'
+            , 'evolve_config': {
+                'level'           : 2
+                , 'times'  : 25
+                , 'reticulate_chance' : 0.3
+                , 'termination_chance': 0.1
+            }
+        }
+        , 'rebuild_trinets' : 0
+        , 'trinet_config'   : {
+            'replace_network_distort' : 0
+            , 'switch_leaves_distort' : 0.05
+            , 'move_leaf_distort'     : 0
+            , 'remove_network_distort': 0
+        }
     }
 
     os.environ["PATH"] += os.pathsep + 'C:/Program Files (x86)/Graphviz2.38/bin/'
 
     """ Build or load trinets """
-    if rebuild['generators']:
+    if config['rebuild_generators']:
         regenerate_standard_networks()
     _, biconnected_trinet_binet_list, all_trinet_list = get_standard_networks()
 
     """ Build or load network """
-    if rebuild['network']:
-        dct = test_networks.connections_0
-        main_network = RootedLevelKNetwork.from_connections_dict(dct)
-        dct_1 = test_networks.connections_1
-        network_1 = RootedLevelKNetwork.from_connections_dict(dct_1)
-        dct_2a = test_networks.connections_2a
-        network_2a = RootedLevelKNetwork.from_connections_dict(dct_2a)
-        dct_2b = test_networks.connections_2b
-        network_2b = RootedLevelKNetwork.from_connections_dict(dct_2b)
-        dct_2c = test_networks.connections_2c
-        network_2c = RootedLevelKNetwork.from_connections_dict(dct_2c)
-        dct_2d = test_networks.connections_2d
-        network_2d = RootedLevelKNetwork.from_connections_dict(dct_2d)
-
-        # main_network.replace_leaf_with_network('D1', network_1)
-        # main_network.standardize_internal_node_names()
-        # main_network.replace_leaf_with_network('D2', network_2a)
-        # main_network.standardize_internal_node_names()
-        # main_network.replace_leaf_with_network('D3', network_2b)
-        # main_network.standardize_internal_node_names()
-        main_network.replace_leaf_with_network('D4', network_2c)
-        main_network.standardize_internal_node_names()
-        main_network.replace_leaf_with_network('D5', network_2d)
-        main_network.standardize_internal_node_names()
-
-
-        pickle_save("data/network.pickle", main_network)
+    if config['rebuild_network']:
+        network_config = config['network_config']
+        if network_config['build_type'] == 'dict':
+            dct = network_config['base_net_dict']
+            network = RootedLevelKNetwork.from_connections_dict(dct)
+            network.standardize_internal_node_names()
+        elif network_config['build_type'] == 'enewick':
+            enewick = network_config['enewick']
+            network = RootedLevelKNetwork.from_enewick(enewick)
+        elif network_config['build_type'] == 'evolve':
+            evolve_config = network_config['evolve_config']
+            enewick = '(a, b)0'
+            network = RootedLevelKNetwork.from_enewick(enewick)
+            network.level = evolve_config['level']
+            network.evolve_times(evolve_config['times'], evolve_config['reticulate_chance'])
+            network.terminate(evolve_config['termination_chance'])
+            network.standardize_node_names()
+        network.visualize()
+        pickle_save("data/network.pickle", network)
     network = pickle_read('data/network.pickle')
 
     """ Build or load trinets """
-    if rebuild['trinets']:
+    if config['rebuild_network']:
         trinet_info_list = network.get_exhibited_trinets(max_processes=6, progress_bar=True)
         pickle_save('data/trinets', trinet_info_list)
     trinet_info_list = pickle_read('data/trinets')
 
-    # print(trinet_info_list.summary())
+    """ Distort trinets """
+    if config['rebuild_trinets'] or config['rebuild_network']:
+        distorted_trinet_info_list = copy.deepcopy(trinet_info_list)
+        trinet_config = config['trinet_config']
+        distorted = False
+        if trinet_config['replace_network_distort'] != 0:
+            distorted_trinet_info_list.replace_network_distort(trinet_config['replace_network_distort'], all_trinet_list)
+            distorted = True
+        if trinet_config['switch_leaves_distort'] != 0:
+            distorted_trinet_info_list.switch_leaves_distort(trinet_config['switch_leaves_distort'])
+            distorted = True
+        if trinet_config['move_leaf_distort'] != 0:
+            distorted_trinet_info_list.move_leaf_distort(trinet_config['move_leaf_distort'])
+            distorted = True
+        if trinet_config['remove_network_distort'] != 0:
+            distorted_trinet_info_list.remove_network_distort(trinet_config['remove_network_distort'])
+            distorted = True
+        pickle_save('data/distorted_trinets', distorted_trinet_info_list)
+        if distorted:
+            print(distorted_trinet_info_list.summary())
+    distorted_trinet_info_list = pickle_read('data/distorted_trinets')
 
+    # for trinet_info in all_trinet_list:
+    #     if len({'a', 'b', 'c'}.intersection(trinet_info.network.leaf_names)) != 0:
+    #         trinet_info.network.visualize()
+    # kk
 
-    trinet_info_list.replace_distort(1, all_trinet_list)
+    solver = Solver(trinet_info_list=distorted_trinet_info_list, standard_trinet_info_list=biconnected_trinet_binet_list)
+    result = solver.solve()
+    result.visualize()
+    print(result.equal_structure(network, equal_naming=True))
 
-    print(trinet_info_list.summary(per_network=True))
+    # enewick = '(a, b)0'
+    # network = RootedLevelKNetwork.from_enewick(enewick)
+    # network.visualize()
+    # print(network.cut_arc_matrix)
+    # print(network.to_df(directed=False))
 
     ''' Testing '''
-    #
+

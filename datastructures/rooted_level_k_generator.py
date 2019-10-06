@@ -1,4 +1,4 @@
-from datastructures.rooted_level_k_network import RootedLevelKNetwork, TrinetInfoList, NetworkInfo
+from datastructures.rooted_level_k_network import RootedLevelKNetwork, NetworkInfoList, NetworkInfo
 import numpy as np
 from utils.help_functions import guid
 import itertools
@@ -8,9 +8,9 @@ import copy
 
 
 class RootedLevelKGenerator(RootedLevelKNetwork):
-    def __init__(self, name, dir_adj_matrix: np.ndarray, symmetrical_nodes: bidict, level: int = 2, dimension: int = 2, check_valid: bool = True):
+    def __init__(self, name, dir_adj_matrix: np.ndarray, symmetrical_nodes: bidict, level: int = 2, dimension: int = 2, check_valid: bool = True, char_type='ALPH'):
         logging.debug("Creating generator network.")
-        network = RootedLevelKNetwork.from_dir_adj_matrix(dir_adj_matrix=dir_adj_matrix, level=level, dimension=dimension, check_valid=check_valid)
+        network = RootedLevelKNetwork.from_dir_adj_matrix(dir_adj_matrix=dir_adj_matrix, level=level, dimension=dimension, check_valid=check_valid, char_type=char_type)
         network.logger.debug("Created for generator network creation.")
         super().__init__(network.adj_matrix, network.node_name_map, leaf_numbers=network.leaf_numbers, level=network.level, dimension=network.dimension)
         self.name = name
@@ -32,19 +32,21 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
         edges_iterator = itertools.combinations(all_edges, 3 - number_of_generator_leaves)
 
         # For each possible combination, create trinet and save it to trinets_gen_sides list
-        trinet_info_list = TrinetInfoList()
+        trinet_info_list = NetworkInfoList(network_size=3)
         for edges in edges_iterator:
             extra_leaf_dict = {}
             # Add extra leaves to base net and save together with underlying generator (self) and added edges
             current_trinet = copy.deepcopy(base_net)
             for edge in edges:
-                _, leaf_name = current_trinet.add_leaf_to_edge(edge)
+                _, leaf_name = current_trinet.add_leaf_to_edge(edge, char_type='ALPH')
                 extra_leaf_dict[leaf_name] = edge
             current_trinet.prune()
             if current_trinet.number_of_internals_leaves_reticulations()[2] != self.level:
                 continue
+            current_trinet.reset_optimization_variables()
+            current_trinet.calculate_optimzation_variables()
             trinet_info = NetworkInfo(current_trinet, {'generator'        : self, 'generator_name': self.name, 'reticulations': reticulations,
-                                                       'extra_leaf_dict'  : copy.deepcopy(extra_leaf_dict), 'level': self.level,
+                                                       'extra_leaf_dict'  : copy.deepcopy(extra_leaf_dict), 'strict_level': self.level,
                                                        'symmetrical_nodes': self.symmetrical_nodes})
             trinet_info_list.append(trinet_info)
 
@@ -55,17 +57,19 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
             for edge in edges_iterator:
                 current_trinet = copy.deepcopy(base_net)
                 current_trinet.reset_optimization_variables()
-                new_node_name, leaf_name_1 = current_trinet.add_leaf_to_edge(edge[0])
+                new_node_name, leaf_name_1 = current_trinet.add_leaf_to_edge(edge[0], char_type='ALPH')
                 extra_leaf_dict[leaf_name_1] = edge[0]
-                _, leaf_name_2 = current_trinet.add_leaf_to_edge([new_node_name, edge[0][1]])
+                _, leaf_name_2 = current_trinet.add_leaf_to_edge([new_node_name, edge[0][1]], char_type='ALPH')
                 extra_leaf_dict[leaf_name_2] = edge[0]
 
                 current_trinet.prune()
                 if current_trinet.number_of_internals_leaves_reticulations()[2] != self.level:
                     continue
+                current_trinet.reset_optimization_variables()
+                current_trinet.calculate_optimzation_variables()
                 trinet_info = NetworkInfo(current_trinet, {'generator'      : self, 'generator_name': self.name, 'reticulations': reticulations,
                                                            'extra_leaf_dict': copy.deepcopy(extra_leaf_dict),
-                                                           'level'          : self.level, 'symmetrical_nodes': self.symmetrical_nodes})
+                                                           'strict_level'          : self.level, 'symmetrical_nodes': self.symmetrical_nodes})
                 trinet_info_list.append(trinet_info)
         return trinet_info_list
 
@@ -83,20 +87,22 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
         edges_iterator = itertools.combinations(all_edges, 2 - number_of_generator_leaves)
 
         # For each possible combination, create binet and save it to trinets_gen_sides list
-        binet_info_list = TrinetInfoList()
+        binet_info_list = NetworkInfoList(network_size=3)
         for edges in edges_iterator:
             extra_leaf_dict = {}
             # Add extra leaves to base net and save together with underlying generator (self) and added edges
             current_binet = copy.deepcopy(base_net)
             current_binet.reset_optimization_variables()
             for edge in edges:
-                _, leaf_name = current_binet.add_leaf_to_edge(edge)
+                _, leaf_name = current_binet.add_leaf_to_edge(edge, char_type='ALPH')
                 extra_leaf_dict[leaf_name] = edge
             current_binet.prune()
             if current_binet.number_of_internals_leaves_reticulations()[2] != self.level:
                 continue
+            current_binet.reset_optimization_variables()
+            current_binet.calculate_optimzation_variables()
             binet_info = NetworkInfo(current_binet, {'generator'      : self, 'generator_name': self.name, 'reticulations': reticulations,
-                                                     'extra_leaf_dict': extra_leaf_dict, 'level': self.level, 'symmetrical_nodes': self.symmetrical_nodes})
+                                                     'extra_leaf_dict': extra_leaf_dict, 'strict_level': self.level, 'symmetrical_nodes': self.symmetrical_nodes})
             binet_info_list.append(binet_info)
         return binet_info_list
 

@@ -3,8 +3,9 @@ import logging
 import pickle
 import itertools
 import time
+from tqdm import tqdm
 import copy
-from datastructures.rooted_level_k_network import TrinetInfoList, NetworkInfo, RootedLevelKNetwork
+from datastructures.rooted_level_k_network import NetworkInfoList, NetworkInfo, RootedLevelKNetwork
 
 
 def pickle_save(filename, data):
@@ -32,8 +33,8 @@ def regenerate_standard_networks() -> None:
     }
 
     # Get biconnected binets and trinets for each generator
-    biconnected_trinet_list = TrinetInfoList()
-    biconnected_binet_list = TrinetInfoList()
+    biconnected_trinet_list = NetworkInfoList(network_size=3)
+    biconnected_binet_list = NetworkInfoList(network_size=3)
     for level, generator_list in all_generators.items():
         for generator in generator_list:
             generator_trinet_info_list = generator.build_trinets()
@@ -45,13 +46,13 @@ def regenerate_standard_networks() -> None:
     biconnected_binet_list.uniquify()
 
     # From binets create trinets with two biconnected components
-    two_component_trinet_list = TrinetInfoList()
+    two_component_trinet_list = NetworkInfoList(network_size=3)
     two_binet_infos_iterator = itertools.combinations(biconnected_binet_list, 2)
     for binet_infos in two_binet_infos_iterator:
         previous_two_component_trinet = None
         for index, leaf_name in enumerate(binet_infos[0].network.leaf_names):
             two_component_trinet = copy.deepcopy(binet_infos[0].network)
-            two_component_trinet.replace_leaf_with_network(leaf_name, binet_infos[1].network, replace_names=True)
+            two_component_trinet.replace_leaf_with_network(leaf_name, binet_infos[1].network, replace_names=True, char_type='ALPH')
             if index == 0 or not two_component_trinet.equal_structure(previous_two_component_trinet):
                 two_component_trinet_list.append(NetworkInfo(two_component_trinet))
             previous_two_component_trinet = two_component_trinet
@@ -66,7 +67,7 @@ def regenerate_standard_networks() -> None:
     pickle_out.close()
 
 
-def get_standard_networks() -> (list, TrinetInfoList):
+def get_standard_networks() -> (list, NetworkInfoList):
     """Read and retrieve all possible trinets."""
     logging.debug("Reading and retrieving all possible trinets.")
     pickle_in = open("data/all_networks_save.pickle", 'rb')

@@ -8,6 +8,7 @@ import random
 import socket
 import hashlib
 import numpy as np
+from mip import model
 from bidict import bidict
 
 
@@ -31,12 +32,14 @@ def all_combinations(any_list, min_len, max_len, direction=1):
 
 
 def leaf_name_iterator(min_len, max_len, char_type='alph'):
-    assert char_type in ('alph', 'ALPH')
+    assert char_type in ('alph', 'ALPH', 'uid')
     alphabet = ""
     if char_type == 'alph':
         alphabet = list('abcdefghijklmnopqrstuvwxyz')
     elif char_type == 'ALPH':
         alphabet = list('ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+    elif char_type == 'uid':
+        return guid_generator()
     alphabet_iterator = all_combinations(alphabet, min_len, max_len + 1)
     return alphabet_iterator
 
@@ -77,6 +80,10 @@ def guid():
     uid = hashlib.md5(data.encode('utf-8')).hexdigest()
     logging.debug("Generated unique ID: {}.".format(uid))
     return uid
+
+def guid_generator():
+    while True:
+        yield guid()
 
 
 def leaf_names_to_identifier(leaf_names: list) -> tuple:
@@ -198,4 +205,24 @@ def ncr(n, r):
     return numer / denom
 
 
-dct = {1: 2, 2: 3}
+def simplex_to_ILP(c, A_eq, b_eq, sense="maximize"):
+    if sense == "maximize":
+        m = model.Model(sense=model.MAXIMIZE, solver_name=model.CBC)
+    else:
+        m = model.Model(sense=model.MINIMIZE, solver_name=model.CBC)
+    m.verbose = 0
+    number_of_variables = A_eq.shape[1]
+    y = [m.add_var(var_type=model.BINARY) for i in range(number_of_variables)]
+    for row, b in zip(A_eq, b_eq):
+        m += model.xsum(row[i] * y[i] for i in range(number_of_variables)) <= b
+    m.objective = model.xsum(c[i] * y[i] for i in range(number_of_variables))
+    m.max_mip_gap_abs = 0.05
+    status = m.optimize(max_seconds=300)
+    assert status == model.OptimizationStatus.OPTIMAL or status == model.OptimizationStatus.FEASIBLE, "Could not find feasible solution"
+    solution = [v.x for v in m.vars]
+    return solution, m.objective_value
+
+
+
+
+

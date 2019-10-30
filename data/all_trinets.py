@@ -42,8 +42,8 @@ def regenerate_standard_networks() -> None:
             biconnected_trinet_list.extend(generator_trinet_info_list)
             biconnected_binet_list.extend(generator_binet_info_list)
 
-    biconnected_trinet_list.uniquify()
-    biconnected_binet_list.uniquify()
+    biconnected_trinet_list.uniquify(count=False)
+    biconnected_binet_list.uniquify(count=False)
 
     # From binets create trinets with two biconnected components
     two_component_trinet_list = NetworkInfoList(network_size=3)
@@ -59,7 +59,9 @@ def regenerate_standard_networks() -> None:
 
     two_component_trinet_list.extend(biconnected_trinet_list)
     biconnected_trinet_list.extend(biconnected_binet_list)
-    two_component_trinet_list.uniquify()
+    two_component_trinet_list.uniquify(count=False)
+    biconnected_trinet_list.calculate_info()
+    two_component_trinet_list.calculate_info()
 
     pickle_out = open("data/all_networks_save.pickle", 'wb')
     data = [all_generators, biconnected_trinet_list, two_component_trinet_list]

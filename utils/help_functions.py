@@ -214,15 +214,17 @@ def simplex_to_ILP(c, A_eq, b_eq, sense="maximize"):
     number_of_variables = A_eq.shape[1]
     y = [m.add_var(var_type=model.BINARY) for i in range(number_of_variables)]
     for row, b in zip(A_eq, b_eq):
-        m += model.xsum(row[i] * y[i] for i in range(number_of_variables)) <= b
+        m += model.xsum(row[i] * y[i] for i in range(number_of_variables)) == b
     m.objective = model.xsum(c[i] * y[i] for i in range(number_of_variables))
     m.max_mip_gap_abs = 0.05
     status = m.optimize(max_seconds=300)
     assert status == model.OptimizationStatus.OPTIMAL or status == model.OptimizationStatus.FEASIBLE, "Could not find feasible solution"
     solution = [v.x for v in m.vars]
-    return solution, m.objective_value
+    return solution, m.objective_value, status
 
 
+def shifted_node_number(node_number, other_node_numbers):
+    return node_number - sum([other_node_number < node_number for other_node_number in other_node_numbers])
 
 
 

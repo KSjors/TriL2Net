@@ -25,7 +25,7 @@ class Solver:
 
         self.logger.info(f"Created solver for list of {len(self.trinet_info_list)} trinets representing taxa {self.taxa}")
 
-    def solve(self):
+    def solve(self) -> RootedLevelKNetwork:
         self.logger.info('Started solving')
         self.logger.info('Shrinking ...')
         self.trinet_info_list.add_info(self.standard_trinet_info_list)
@@ -315,6 +315,11 @@ class Solver:
         self.logger.info(f"Locating using using normal")
         score_dict = dict()
         number_of_reticulations = leaf_on_reticulation_side_count_matrix.shape[0]
+        time.sleep(1)
+        print(leaf_on_edge_side_count_matrix)
+        print(leaf_set)
+        print(edge_sides)
+        time.sleep(1)
 
         # Pick best leaves to place on reticulation sides
         reticulation_side_permutation_iterator = itertools.permutations(leaf_set.keys(), number_of_reticulations)
@@ -374,9 +379,14 @@ class Solver:
             edge_1_3_leaves = edge_side_leaf_dict[('1', '3')]
             edge_1_3_leaf_indicis = sorted([leaf_set.inverse[leaf_name] for leaf_name in edge_1_3_leaves])
             leaf_order_matrix_2 = self.leaf_order_info_of_network_set(network_list, leaf_set)
+            time.sleep(1)
+            print(leaf_order_matrix_2)
+            print(leaf_set)
+            time.sleep(1)
             x = leaf_set.inverse[reticulation_side_order[0]]
             y = leaf_set.inverse[reticulation_side_order[1]]
             leaf_per_reticulation = (np.array([np.argmax(row) for row in leaf_order_matrix_2[edge_1_3_leaf_indicis][:, [x, y]]]))
+            # TODO: currently happens that values can be equal for each reticulation and a random one is chosen :(
             edge_side_leaf_dict[('1', '3')] = set([leaf_set[edge_1_3_leaf_indicis[leaf_index]] for leaf_index in np.where(leaf_per_reticulation == 0.)[0]])
             edge_side_leaf_dict[('1', '4')] = set([leaf_set[edge_1_3_leaf_indicis[leaf_index]] for leaf_index in np.where(leaf_per_reticulation == 1.)[0]])
 

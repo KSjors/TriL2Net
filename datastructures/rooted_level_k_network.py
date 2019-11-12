@@ -99,8 +99,8 @@ class RootedLevelKNetwork:
 
     @classmethod
     def from_enewick(cls, string, check_valid=True):
-        adjacency_dict = enewick(string)
-        result = cls.from_connections_dict(adjacency_dict, check_valid=check_valid)
+        adjacency_dict, leaf_names = enewick(string)
+        result = cls.from_connections_dict(adjacency_dict, leaf_names=list(leaf_names), check_valid=check_valid)
         return result
 
     @classmethod
@@ -139,13 +139,13 @@ class RootedLevelKNetwork:
         return network
 
     @classmethod
-    def from_connections_dict(cls, connections_dict: dict, level=2, dimension=2, check_valid=True):
+    def from_connections_dict(cls, connections_dict: dict, leaf_names: list = None, level=2, dimension=2, check_valid=True):
         node_name_map = bidict()
-        leaf_names = list()
+        leaf_names = coalesce(leaf_names, [])
 
         # Empty adjacency matrix
         adj_matrix = np.zeros((0, 0)).astype(int)
-        network = cls(adj_matrix=adj_matrix, node_name_map=node_name_map, leaf_names=leaf_names, level=level, dimension=dimension)
+        network = cls(adj_matrix=adj_matrix, node_name_map=node_name_map, leaf_names=[], level=level, dimension=dimension)
 
         for from_node_name in connections_dict.keys():
             network._add_node_to_network(str(from_node_name))
@@ -160,6 +160,10 @@ class RootedLevelKNetwork:
             for to_node_name in to_node_names:
                 to_node_number = network.get_node_number_of(str(to_node_name))
                 network._add_arc(from_node_number, to_node_number)
+
+        for leaf_name in leaf_names:
+            if leaf_name not in network.node_name_map:
+                network._add_node_to_network(str(leaf_name), leaf=True)
         assert (not check_valid) or network.is_valid(), "Connection dictionary results in an invalid network."
         return network
 
@@ -176,6 +180,15 @@ class RootedLevelKNetwork:
         leaf_names = [name for name in node_names_below_node if network.is_leaf_node(name)]
         new_network = cls(adj_matrix=adj_matrix, node_name_map=node_name_map, leaf_names=leaf_names, level=network.level, dimension=network.dimension)
         return new_network
+
+    @classmethod
+    def random(cls, number_of_leaves: int, recombination_chance: int, level: int):
+        enewick_string = '(a, b)0'
+        network = cls.from_enewick(enewick_string)
+        network.level = level
+        network.evolve_times(number_of_leaves-2, recombination_chance, progress_bar=False)
+        network.standardize_node_names()
+        return network
 
     def is_valid(self) -> bool:
         """Check if network is valid: has right degrees and number of roots and reticulations"""
@@ -628,20 +641,17 @@ class RootedLevelKNetwork:
         self._terminate_leaves(leaf_numbers_to_terminate=leaf_numbers_to_terminate, leaf_numbers_to_keep=leaf_numbers_to_keep)
 
     def _terminate_leaves(self, leaf_numbers_to_terminate: list = None, leaf_numbers_to_keep: list = None):
-        all_removed_nodes = []
         leaf_numbers_to_terminate = coalesce(leaf_numbers_to_terminate, [])
         leaf_numbers_to_keep = coalesce(leaf_numbers_to_keep, [])
         if len(leaf_numbers_to_terminate) == 0:
-            leaf_numbers_to_terminate = set(self.leaf_numbers).difference(leaf_numbers_to_keep)
-        for leaf_number in leaf_numbers_to_terminate:
-            leaf_number = shifted_node_number(leaf_number, all_removed_nodes)
-            all_removed_nodes.extend(self._terminate_node(leaf_number))
-        return
+            leaf_numbers_to_terminate = sorted(list(set(self.leaf_numbers).difference(leaf_numbers_to_keep)), reverse=True)
+        for leaf_index in range(len(leaf_numbers_to_terminate)):
+            removed_nodes_numbers = self._terminate_node(leaf_numbers_to_terminate[leaf_index], [])
+            leaf_numbers_to_terminate = [shifted_node_number(leaf_number, removed_nodes_numbers) for leaf_number in leaf_numbers_to_terminate]
 
     def _terminate_leaf(self, leaf_number: int):
         """Remove leaf and prune to make a proper network again"""
         self._terminate_node(leaf_number)
-        self.prune()
 
     def terminate_leaf(self, leaf_name: str):
         """Remove leaf and prune to make a proper network again"""
@@ -1111,7 +1121,7 @@ class RootedLevelKNetwork:
     def _reticulations_of_component(self, component):
         return [self._is_reticulation_node(node_number) for node_number in component]
 
-    # ---------------------------------------------------------------- EVOLUTION/TERMINATE METHODS ---------------------------------------------------------------- #
+    # ---------------------------------------------------------------- EVOLUTION/TERMINATE METHODS ---------------------------------------------------------- #
     def _terminate_node(self, node_number: int, removed_node_numbers: list = None) -> list:
         removed_node_numbers = coalesce(removed_node_numbers, [])
         node_number = shifted_node_number(node_number, removed_node_numbers)
@@ -1170,141 +1180,6 @@ class RootedLevelKNetwork:
                     bc = [shifted_node_number(node, removed_nodes) for node in bc]
                     self._suppress_component(bc)
                     removed_nodes.extend(bc)
-
-    def full_network_set(self, max_processes=1, progress_bar=False):
-        """Create network set of exhibited networks with n leaves"""
-        self.logger.debug(f"Creating network set of all exhibited networks using {max_processes} processes")
-        N = self.number_of_leaves,
-        lst = list(itertools.chain.from_iterable([self.network_set(max_processes, progress_bar, n) for n in range(2, N + 1)]))
-        network_info_list = NetworkInfoList(network_size=N, lst=lst)
-        return network_info_list
-
-    # def network_set(self, max_processes=1, progress_bar=False, n=3):
-    #     """Create network set of exhibited networks with n leaves"""
-    #     self.logger.debug(f"Creating network set of exhibited networks with {n} leaves using {max_processes} processes")
-    #     assert n <= self.number_of_leaves
-    #
-    #     leaves = self.leaf_numbers
-    #     total = int(scipy.special.comb(len(leaves), n))
-    #     n_set = list(itertools.combinations(leaves, n))
-    #
-    #     pool = multiprocessing.Pool(max_processes)
-    #     network_info_list = NetworkInfoList(network_size=n)
-    #     if progress_bar:
-    #         for x in tqdm(pool.imap_unordered(self._network_set_helper, n_set), total=total, desc=f"Computing network set  ({n})"):
-    #             network_info_list.append(x)
-    #     else:
-    #         for x in pool.imap_unordered(self._network_set_helper, n_set):
-    #             network_info_list.append(x)
-    #     pool.close()
-    #     pool.join()
-    #     return network_info_list
-
-    def _network_set_helper(self, n_set):
-        result = NetworkInfo(self.exhibited_network_on_leaves(self, leaf_numbers=list(n_set)))
-        return result
-
-    def _suppress_reticulations(self, progress_bar=False):
-        if progress_bar:
-            progress_bar = tqdm(total=int(2 ** self.number_of_reticulations), desc='Suppressing reticulations')
-            result = self._suppress_reticulations_helper_progress_bar(progress_bar)
-            progress_bar.close()
-            return result
-        else:
-            return self._suppress_reticulations_helper()
-
-    def _suppress_reticulations_helper(self):
-        reticulation_numbers = sorted(self._reticulations)
-        if len(reticulation_numbers) == 0:
-            return NetworkInfoList(network_size=self.number_of_leaves, lst=[NetworkInfo(self)])
-
-        reticulation_number = reticulation_numbers.pop()
-        parents_current_reticulation = self._nodes_above_nodes(children_numbers={reticulation_number}, max_height=1).difference([reticulation_number])
-        result = NetworkInfoList(network_size=self.number_of_leaves)
-        for current_parent in parents_current_reticulation:
-            new_network = copy.deepcopy(self)
-            removed_node_numbers = []
-            shifted_reticulation = reticulation_number
-            for other_parent in set(parents_current_reticulation).difference([current_parent]):
-                shifted_other_parent = shifted_node_number(other_parent, removed_node_numbers)
-                shifted_reticulation = shifted_node_number(reticulation_number, removed_node_numbers)
-                new_network._remove_arc(shifted_other_parent, shifted_node_number(shifted_reticulation, removed_node_numbers))
-                in_degree, out_degree = new_network._in_degree_node(shifted_other_parent), new_network._out_degree_node(shifted_other_parent)
-                if out_degree == 0:
-                    removed_node_numbers.extend(new_network._terminate_node(shifted_other_parent))
-                elif out_degree == 1 and in_degree == 1:
-                    new_network._suppress_node(shifted_other_parent)
-                    removed_node_numbers.append(shifted_other_parent)
-                elif in_degree == 0 and out_degree == 1:
-                    removed_node_numbers.extend(new_network._terminate_node(shifted_other_parent))
-            new_network._suppress_node(shifted_node_number(shifted_reticulation, removed_node_numbers))
-            result.extend(new_network._suppress_reticulations_helper())
-        return result
-
-    def _suppress_reticulations_helper_progress_bar(self, progress_bar):
-        reticulation_numbers = sorted(self._reticulations)
-        if len(reticulation_numbers) == 0:
-            progress_bar.update(1)
-            return NetworkInfoList(network_size=self.number_of_leaves, lst=[NetworkInfo(self)])
-
-        reticulation_number = reticulation_numbers.pop()
-        parents_current_reticulation = self._nodes_above_nodes(children_numbers={reticulation_number}, max_height=1).difference([reticulation_number])
-        result = NetworkInfoList(network_size=self.number_of_leaves)
-        for current_parent in parents_current_reticulation:
-            new_network = copy.deepcopy(self)
-            removed_node_numbers = []
-            shifted_reticulation = reticulation_number
-            for other_parent in set(parents_current_reticulation).difference([current_parent]):
-                shifted_other_parent = shifted_node_number(other_parent, removed_node_numbers)
-                shifted_reticulation = shifted_node_number(reticulation_number, removed_node_numbers)
-                new_network._remove_arc(shifted_other_parent, shifted_node_number(shifted_reticulation, removed_node_numbers))
-                in_degree, out_degree = new_network._in_degree_node(shifted_other_parent), new_network._out_degree_node(shifted_other_parent)
-                if out_degree == 0:
-                    removed_node_numbers.extend(new_network._terminate_node(shifted_other_parent))
-                elif out_degree == 1 and in_degree == 1:
-                    new_network._suppress_node(shifted_other_parent)
-                    removed_node_numbers.append(shifted_other_parent)
-                elif in_degree == 0 and out_degree == 1:
-                    removed_node_numbers.extend(new_network._terminate_node(shifted_other_parent))
-            new_network._suppress_node(shifted_node_number(shifted_reticulation, removed_node_numbers))
-            result.extend(new_network._suppress_reticulations_helper_progress_bar(progress_bar))
-        return result
-
-    def full_tree_set(self, max_processes=1, progress_bar=False):
-        full_network_set = self.full_network_set(max_processes, progress_bar)
-        lst = [[tree for tree in sub_network.newtork._suppress_reticulations()] for sub_network in full_network_set]
-        lst = list(itertools.chain.from_iterable(lst))
-        return NetworkInfoList(network_size=self.number_of_leaves, lst=lst)
-
-    def tree_set(self, max_processes=1, progress_bar=False, n=3):
-        network_set = self.network_set(max_processes, progress_bar, n)
-        lst = [[tree for tree in sub_network.newtork._suppress_reticulations()] for sub_network in network_set]
-        lst = list(itertools.chain.from_iterable(lst))
-        return NetworkInfoList(network_size=n, lst=lst)
-
-    # TODO: pbar
-    def get_exhibited_clusters(self, max_processes=1, progress_bar=False):
-        cluster_info_list = NetworkInfoList(network_size=self.number_of_leaves)
-        trees_info_list = self._suppress_reticulations(progress_bar)
-        pool = multiprocessing.Pool(max_processes)
-        if progress_bar:
-            progress_bar = tqdm(total=int(self.number_of_edges * (2 ** self.number_of_reticulations)), desc="Computing clusters")
-        for network_info in trees_info_list:
-            for node in network_info.network.internal_node_numbers:
-                network = a
-                cluster_info_list.append(NetworkInfo(network))
-                if progress_bar:
-                    progress_bar.update(1)
-        pool.close()
-        pool.join()
-        if progress_bar:
-            progress_bar.n = int(self.number_of_edges * (2 ** self.number_of_reticulations))
-            progress_bar.close()
-        cluster_info_list.uniquify(equal_naming=True, count=False)
-        return cluster_info_list
-
-    def _get_exhibited_clusters_helper(self, node):
-        return RootedLevelKNetwork._get_network_below_node(network_info.network, node)
 
     def _stable_ancestors_of_nodes(self, node_numbers: list):
         leafless_node_numbers = []
@@ -1369,9 +1244,9 @@ class RootedLevelKNetwork:
         if file_path:
             dot.format = format
             if file_path[-4:] == f'.{format}':
-                dot.render(filename=file_path[:-4], format=format)
+                dot.render(filename=file_path[:-4])
             else:
-                dot.render(filename=file_path, format=format)
+                dot.render(filename=file_path)
         else:
             dot.render(view=True)
             time.sleep(0.2)
@@ -1386,69 +1261,69 @@ class RootedLevelKNetwork:
         result = pd.DataFrame(columns=ordered_node_names, index=ordered_node_names[:length], data=data[:length])
         return result.astype(int)
 
-    def network_set_consistency(self, other, n=3, max_processes=1, progress_bar=False):
-        self_network_info_list = self.network_set(n=n, max_processes=max_processes, progress_bar=progress_bar)
-        other_network_info_list = other.network_set(n=n, max_processes=max_processes, progress_bar=progress_bar)
-
-        if progress_bar:
-            count = 0
-            for self_network_info in tqdm(self_network_info_list, desc=f"Comparing network sets"):
-                for other_network_info in other_network_info_list:
-                    equal, _, _ = self_network_info.network.equal_structure(other_network_info.network, optimize=True, equal_naming=True)
-                    if equal:
-                        count += 1
-                        break
-        else:
-            count = 0
-            for self_network_info in self_network_info_list:
-                for other_network_info in other_network_info_list:
-                    equal, _, _ = self_network_info.network.equal_structure(other_network_info.network, optimize=True, equal_naming=True)
-                    if equal:
-                        count += 1
-                        break
-
-        return count, len(self_network_info_list)
-
-    def full_network_set_consistency(self, other, max_processes=1, progress_bar=False):
-        total = 0
-        count = 0
-        for n in range(2, self.number_of_leaves + 1):
-            extra_count, extra_total = self.network_set_consistency(other, n, max_processes, progress_bar)
-            total += extra_total
-            count += extra_count
-        return count, total
-
-    def tree_set_consistency(self, other, n=3, max_processes=1, progress_bar=False):
-        self_tree_info_list = self.tree_set(n=n, max_processes=max_processes, progress_bar=progress_bar)
-        other_tree_info_list = other.tree_set(n=n, max_processes=max_processes, progress_bar=progress_bar)
-
-        if progress_bar:
-            count = 0
-            for self_tree_info in tqdm(self_tree_info_list, desc=f"Comparing network sets"):
-                for other_tree_info in other_tree_info_list:
-                    equal, _, _ = self_tree_info.network.equal_structure(other_tree_info.network, optimize=True, equal_naming=True)
-                    if equal:
-                        count += 1
-                        break
-        else:
-            count = 0
-            for self_tree_info in self_tree_info_list:
-                for other_tree_info in other_tree_info_list:
-                    equal, _, _ = self_tree_info.network.equal_structure(other_tree_info.network, optimize=True, equal_naming=True)
-                    if equal:
-                        count += 1
-                        break
-
-        return count, len(self_tree_info_list)
-
-    def full_tree_set_consistency(self, other, max_processes=1, progress_bar=False):
-        total = 0
-        count = 0
-        for n in range(2, self.number_of_leaves + 1):
-            extra_count, extra_total = self.tree_set_consistency(other, n, max_processes, progress_bar)
-            total += extra_total
-            count += extra_count
-        return count, total
+    # def network_set_consistency(self, other, n=3, max_processes=1, progress_bar=False):
+    #     self_network_info_list = self.network_set(n=n, max_processes=max_processes, progress_bar=progress_bar)
+    #     other_network_info_list = other.network_set(n=n, max_processes=max_processes, progress_bar=progress_bar)
+    #
+    #     if progress_bar:
+    #         count = 0
+    #         for self_network_info in tqdm(self_network_info_list, desc=f"Comparing network sets"):
+    #             for other_network_info in other_network_info_list:
+    #                 equal, _, _ = self_network_info.network.equal_structure(other_network_info.network, optimize=True, equal_naming=True)
+    #                 if equal:
+    #                     count += 1
+    #                     break
+    #     else:
+    #         count = 0
+    #         for self_network_info in self_network_info_list:
+    #             for other_network_info in other_network_info_list:
+    #                 equal, _, _ = self_network_info.network.equal_structure(other_network_info.network, optimize=True, equal_naming=True)
+    #                 if equal:
+    #                     count += 1
+    #                     break
+    #
+    #     return count, len(self_network_info_list)
+    #
+    # def full_network_set_consistency(self, other, max_processes=1, progress_bar=False):
+    #     total = 0
+    #     count = 0
+    #     for n in range(2, self.number_of_leaves + 1):
+    #         extra_count, extra_total = self.network_set_consistency(other, n, max_processes, progress_bar)
+    #         total += extra_total
+    #         count += extra_count
+    #     return count, total
+    #
+    # def tree_set_consistency(self, other, n=3, max_processes=1, progress_bar=False):
+    #     self_tree_info_list = self.tree_set(n=n, max_processes=max_processes, progress_bar=progress_bar)
+    #     other_tree_info_list = other.tree_set(n=n, max_processes=max_processes, progress_bar=progress_bar)
+    #
+    #     if progress_bar:
+    #         count = 0
+    #         for self_tree_info in tqdm(self_tree_info_list, desc=f"Comparing network sets"):
+    #             for other_tree_info in other_tree_info_list:
+    #                 equal, _, _ = self_tree_info.network.equal_structure(other_tree_info.network, optimize=True, equal_naming=True)
+    #                 if equal:
+    #                     count += 1
+    #                     break
+    #     else:
+    #         count = 0
+    #         for self_tree_info in self_tree_info_list:
+    #             for other_tree_info in other_tree_info_list:
+    #                 equal, _, _ = self_tree_info.network.equal_structure(other_tree_info.network, optimize=True, equal_naming=True)
+    #                 if equal:
+    #                     count += 1
+    #                     break
+    #
+    #     return count, len(self_tree_info_list)
+    #
+    # def full_tree_set_consistency(self, other, max_processes=1, progress_bar=False):
+    #     total = 0
+    #     count = 0
+    #     for n in range(2, self.number_of_leaves + 1):
+    #         extra_count, extra_total = self.tree_set_consistency(other, n, max_processes, progress_bar)
+    #         total += extra_total
+    #         count += extra_count
+    #     return count, total
 
     def equal_structure(self, other, optimize=True, equal_naming=False, progress_bar=False) -> (bool, list, list):
         if self.number_of_nodes != other.number_of_nodes:
@@ -1511,50 +1386,47 @@ class RootedLevelKNetwork:
             other_node_cut_arc_sets = [len(cut_arc_set) for cut_arc_set in other_cut_arc_sets if other_current_node in cut_arc_set]
             if collections.Counter(self_node_cut_arc_sets) != collections.Counter(other_node_cut_arc_sets):
                 return []  # False
-        if len(self_node_children) == 1:
-            self_child = self_node_children.pop()
-            other_child = other_node_children.pop()
-            new_translation_dicts = []
-            for translation_dict in translation_dicts:
-                if not check_bidict(translation_dict, self_child, other_child):
-                    continue
-                new_translation_dict = copy.copy(translation_dict)
-                new_translation_dict[self_child] = other_child
-                new_dicts = self._equal_structure(self_child, other, other_child, [new_translation_dict], pbar, optimize=optimize, equal_naming=equal_naming)
-                for new_dict in new_dicts:
-                    if len(new_dict) == self.number_of_nodes:
-                        return [new_dict]
-                new_translation_dicts.extend(new_dicts)
-            return new_translation_dicts
-        if len(self_node_children) == 2:
-            translation_dicts_to_return = []
-            self_child_1 = self_node_children.pop()
-            self_child_2 = self_node_children.pop()
-            other_child_1 = other_node_children.pop()
-            other_child_2 = other_node_children.pop()
 
-            # Option 1
-            for (other_child_option_1, other_child_option_2) in [(other_child_1, other_child_2), (other_child_2, other_child_1)]:
-                for translation_dict in translation_dicts:
-                    if not (check_bidict(translation_dict, self_child_1, other_child_option_1) and check_bidict(translation_dict, self_child_2,
-                                                                                                                other_child_option_2)):
-                        continue
-                    new_translation_dict = copy.copy(translation_dict)
-                    new_translation_dict[self_child_1] = other_child_option_1
-                    new_translation_dict[self_child_2] = other_child_option_2
-                    returned_translation_dicts_1 = self._equal_structure(self_child_1, other, other_child_option_1, [new_translation_dict], pbar,
-                                                                         optimize=optimize, equal_naming=equal_naming)
-                    for returned_translation_dict_1 in returned_translation_dicts_1:
-                        new_dicts = self._equal_structure(self_child_2, other, other_child_option_2, [returned_translation_dict_1], pbar, optimize=optimize,
+        bijections_iterator = itertools.permutations(range(len(self_node_children)))
+        self_node_children = list(self_node_children)
+        other_node_children = list(other_node_children)
+        translation_dicts_to_return = []
+        for bijection in bijections_iterator:
+            extra_translation_dict = bidict({self_node_children[index]: other_node_children[value] for index, value in enumerate(bijection)})
+            current_translation_dicts = []
+            for translation_dict in translation_dicts:
+                if self.bijection_contradicts_bijection(translation_dict, extra_translation_dict):
+                    continue
+                current_translation_dicts.append(bidict({**translation_dict, **extra_translation_dict}))
+                for new_self_node, new_other_node in extra_translation_dict.items():
+                    next_translation_dicts = []
+                    for current_translation_dict in current_translation_dicts:
+                        new_dicts = self._equal_structure(new_self_node, other, new_other_node, [current_translation_dict], pbar, optimize=optimize,
                                                           equal_naming=equal_naming)
                         for new_dict in new_dicts:
                             if len(new_dict) == self.number_of_nodes:
                                 return [new_dict]
-                        translation_dicts_to_return.extend(new_dicts)
-            return translation_dicts_to_return
+                        next_translation_dicts.extend(new_dicts)
+                    current_translation_dicts = next_translation_dicts
+            translation_dicts_to_return.extend(current_translation_dicts)
+        return translation_dicts_to_return
 
-    def evolve_times(self, times: int, recombination_chance: int = 0) -> str:
+    @staticmethod
+    def bijection_contradicts_bijection(bijection_1, bijection_2):
+        if len(bijection_1) > len(bijection_2):
+            bijection_1, bijection_2 = bijection_2, bijection_1
+        for key, value in bijection_1.items():
+            if key in bijection_2:
+                if bijection_2[key] != value:
+                    return True
+            if value in bijection_2.inverse:
+                if bijection_2.inverse[value] != key:
+                    return True
+        return False
+
+    def evolve_times(self, times: int, recombination_chance: int = 0, progress_bar=False) -> str:
         result = ""
+        pbar = tqdm(total=times, desc=f"Evolving network")
         while times > 0:
             if times == 1:
                 recombined, res = self.evolve(0)
@@ -1562,6 +1434,8 @@ class RootedLevelKNetwork:
                 recombined, res = self.evolve(recombination_chance)
             times -= 1 + int(recombined)
             result += res
+            pbar.update(1 + int(recombined))
+        pbar.close()
 
         changes = True
         while changes:
@@ -1639,7 +1513,7 @@ class RootedLevelKNetwork:
         self.standardize_node_names()
 
     def enewick(self):
-        return self._enewick(self._root())
+        return self._enewick(self._root)
 
     def _enewick(self, current_node, traversed_nodes=None):
         traversed_nodes = coalesce(traversed_nodes, [])
@@ -1678,7 +1552,7 @@ class RootedLevelKNetwork:
 
 
 class NetworkInfo:
-    def __init__(self, network, info: dict = None):
+    def __init__(self, network: RootedLevelKNetwork, info: dict = None):
         self.network = network
         self.info = coalesce(info, dict())
         self.multiplicity = 1
@@ -1746,16 +1620,20 @@ class NetworkInfoList:
         assert network_size < network_info_list.network_size, "Can only create smaller network info lists with smaller network size."
         result = cls(network_size)
         for network_info in network_info_list:
-            result.extend(cls.exhibited_networks_of_network(network_info.network, network_size, max_processes, progress_bar=False))
+            result.extend(cls.induced_strict_network_set(network_info.network, network_size, max_processes, progress_bar=False))
         return result
 
     @classmethod
-    def exhibited_networks_of_network(cls, network: RootedLevelKNetwork, network_size: int, max_processes: int = 1, progress_bar: bool = False):
-        return cls._exhibited_networks_of_network_recursive(network, network_size, max_processes, progress_bar, network.leaf_names, 0)
+    def induced_strict_network_set(cls, network: RootedLevelKNetwork, network_size: int, max_processes: int = 1, progress_bar: bool = False,
+                                   method='Recursive'):
+        if method == 'Recursive':
+            return cls._induced_strict_network_set_recursive(network, network_size, max_processes, progress_bar, network.leaf_names, 0)
+        elif method == 'Iterative':
+            return cls.induced_strict_network_set_iterative(network, network_size, max_processes, progress_bar)
 
     @classmethod
-    def _exhibited_networks_of_network_recursive(cls, network: RootedLevelKNetwork, network_size: int, max_processes: int, progress_bar: bool, leaf_names: list,
-                                                 index: int):
+    def _induced_strict_network_set_recursive(cls, network: RootedLevelKNetwork, network_size: int, max_processes: int, progress_bar: bool, leaf_names: list,
+                                              index: int):
         result = cls(network_size=network_size)
         number_of_leaves = network.number_of_leaves
         if number_of_leaves == network_size:
@@ -1766,60 +1644,76 @@ class NetworkInfoList:
             terminate_leaf_name_iterator = [leaf_names[index] for index in range(index, len(leaf_names) - (number_of_leaves - network_size) + 1)]
             if max_processes == 1:
                 if progress_bar:
-                    for index_2, terminate_leaf_name in tqdm(enumerate(terminate_leaf_name_iterator), total=len(terminate_leaf_name_iterator), desc="Computing exhibited trinets"):
+                    for index_2, terminate_leaf_name in tqdm(enumerate(terminate_leaf_name_iterator), total=len(terminate_leaf_name_iterator),
+                                                             desc="Computing exhibited trinets recursively"):
                         new_network = copy.deepcopy(network)
                         new_network.terminate_leaf(terminate_leaf_name)
-                        result.extend(cls._exhibited_networks_of_network_recursive(new_network, network_size, max_processes=1, progress_bar=False, leaf_names=leaf_names, index=index + index_2 + 1))
+                        result.extend(
+                            cls._induced_strict_network_set_recursive(new_network, network_size, max_processes=1, progress_bar=False, leaf_names=leaf_names,
+                                                                      index=index + index_2 + 1))
                 else:
                     for index_2, terminate_leaf_name in enumerate(terminate_leaf_name_iterator):
                         new_network = copy.deepcopy(network)
                         new_network.terminate_leaf(terminate_leaf_name)
-                        result.extend(cls._exhibited_networks_of_network_recursive(new_network, network_size, max_processes=1, progress_bar=False, leaf_names=leaf_names, index=index + index_2 + 1))
+                        result.extend(
+                            cls._induced_strict_network_set_recursive(new_network, network_size, max_processes=1, progress_bar=False, leaf_names=leaf_names,
+                                                                      index=index + index_2 + 1))
             else:
                 pool = multiprocessing.Pool(max_processes)
                 index_2 = 0
                 if progress_bar:
                     for new_network in tqdm(
-                            pool.imap_unordered(cls._exhibited_networks_of_network_recursive_helper, zip(terminate_leaf_name_iterator, itertools.repeat(network), itertools.repeat('none'), itertools.repeat(False))),
-                            total=len(terminate_leaf_name_iterator), desc=f"Computing exhibited trinets using {max_processes} processes"):
-                        result.extend(cls._exhibited_networks_of_network_recursive(new_network, network_size, max_processes=1, progress_bar=False, leaf_names=leaf_names, index=index + index_2 + 1))
+                            pool.imap_unordered(cls._induced_strint_network_set_recursive_helper, zip(terminate_leaf_name_iterator, itertools.repeat(network))),
+                            total=len(terminate_leaf_name_iterator), desc=f"Computing exhibited trinets recursively using {max_processes} processes"):
+                        result.extend(cls._induced_strict_network_set_recursive(
+                            new_network
+                            , network_size
+                            , max_processes=1
+                            , progress_bar=False
+                            , leaf_names=leaf_names
+                            , index=index + index_2 + 1))
                         index_2 += 1
                 else:
-                    for new_network in pool.imap_unordered(cls._exhibited_networks_of_network_recursive_helper, zip(terminate_leaf_name_iterator, itertools.repeat(network), itertools.repeat('none'), itertools.repeat(False))):
-                        result.extend(cls._exhibited_networks_of_network_recursive(new_network, network_size, max_processes=1, progress_bar=False, leaf_names=leaf_names, index=index + index_2 + 1))
+                    for new_network in pool.imap_unordered(
+                            cls._induced_strint_network_set_recursive_helper, zip(terminate_leaf_name_iterator, itertools.repeat(network))):
+                        result.extend(cls._induced_strict_network_set_recursive(
+                            new_network
+                            , network_size
+                            , max_processes=1
+                            , progress_bar=False
+                            , leaf_names=leaf_names
+                            , index=index + index_2 + 1))
                         index_2 += 1
                 pool.close()
                 pool.join()
             return result
 
     @classmethod
-    def _exhibited_networks_of_network_recursive_helper(cls, leaf_network_prune):
-        terminate_leaf_name, network, suppress_redundant, suppress_redundant = leaf_network_prune
+    def _induced_strint_network_set_recursive_helper(cls, leaf_network):
+        terminate_leaf_name, network = leaf_network
         new_network = copy.deepcopy(network)
-        new_network.terminate(terminate_leaf_name)
-        if suppress_redundant or suppress_redundant:
-            new_network.prune(suppress_redundant, suppress_redundant)
+        new_network.terminate_leaf(terminate_leaf_name)
         return new_network
 
     @classmethod
-    def exhibited_networks_of_network_2(cls, network: RootedLevelKNetwork, network_size: int, max_processes: int = 1, progress_bar: bool = False):
+    def induced_strict_network_set_iterative(cls, network: RootedLevelKNetwork, network_size: int, max_processes: int = 1, progress_bar: bool = False):
         result = cls(network_size=network_size)
         n_set_iterator = itertools.combinations(network.leaf_numbers, 3)
         pool = multiprocessing.Pool(max_processes)
         if progress_bar:
             for new_network in tqdm(
-                    pool.imap_unordered(cls._exhibited_networks_of_network_2_helper, zip(n_set_iterator, itertools.repeat(network))),
-                    total=ncr(network.number_of_leaves, network_size), desc=f"Computing exhibited trinets using {max_processes} processes"):
+                    pool.imap_unordered(cls._induced_strict_network_set_iterative_helper, zip(n_set_iterator, itertools.repeat(network))),
+                    total=ncr(network.number_of_leaves, network_size), desc=f"Computing exhibited trinets iteratively using {max_processes} processes"):
                 result.append(NetworkInfo(new_network))
         else:
-            for new_network in pool.imap_unordered(cls._exhibited_networks_of_network_2_helper, zip(n_set_iterator, itertools.repeat(network))):
+            for new_network in pool.imap_unordered(cls._induced_strict_network_set_iterative_helper, zip(n_set_iterator, itertools.repeat(network))):
                 result.append(NetworkInfo(new_network))
         pool.close()
         pool.join()
         return result
 
     @classmethod
-    def _exhibited_networks_of_network_2_helper(cls, n_set_network):
+    def _induced_strict_network_set_iterative_helper(cls, n_set_network):
         n_set, network = n_set_network
         return RootedLevelKNetwork._exhibited_network_on_leaves(network, n_set)
 
@@ -1827,16 +1721,181 @@ class NetworkInfoList:
     # def displayed_networks(cls, network: RootedLevelKNetwork, max_level: int = 0, max_processes: int = 1, progress_bar: bool = False):
     #     result = cls(network_size=network.number_of_leaves)
     #     biconnected_components = network._biconnected_components
-    #     reticulations_of_biconnected_components = [network._reticulations_of_component(biconnected_component) for biconnected_component in
-    #                                                biconnected_components]
-    #     for biconnected_component in zip(biconnected_components, reticulations_of_biconnected_components):
-    #         level = len(reticulations_of_biconnected_components)
+    #     reticulations_of_biconnected_components = [network._reticulations_of_component(biconnected_component)
+    #                                                for biconnected_component in biconnected_components]
+    #     networks = [network]
+    #     for biconnected_component, reticulations_of_biconnected_component in zip(biconnected_components, reticulations_of_biconnected_components):
+    #         level = len(reticulations_of_biconnected_component)
     #         if level > max_level:
-    #             reticulations_to_remove_iterator = itertools.combinations(reticulations_of_biconnected_components, level - max_level)
-    #             for reticulations_to_remove in reticulations_to_remove_iterator:
+    #             reticulations_to_suppress_iterator = itertools.combinations(reticulations_of_biconnected_component, level - max_level)
+    #             for reticulations_to_suppress in reticulations_to_suppress_iterator:
+    #                 new_network = copy.deepcopy(network)
+    #                 for reticulation_to_suppress in reticulations_to_suppress:
+    #                     new_network.suppress_reticulation(reticulation_to_suppress)
 
-    # @classmethod
-    # def exhibited_trees(cls, network: RootedLevelKNetwork, network_size: int, max_processes: int = 1, progress_bar: bool = False):
+    @classmethod
+    def displayed_trees(cls, network: RootedLevelKNetwork, max_processes: int = 1, progress_bar: bool = False):
+        network_info_list = cls(network_size=network.number_of_leaves)
+        network_info_list.append(NetworkInfo(network))
+        return cls._displayed_trees_recursive(network_info_list, max_processes, progress_bar, network.reticulations, 0)
+
+    @classmethod
+    def _displayed_trees_recursive(cls, network_info_list, max_processes: int, progress_bar: bool, reticulation_names: list, index: int):
+        result = cls(network_size=network_info_list.network_size)
+        number_of_reticulations = network_info_list[0].network.number_of_reticulations
+        if number_of_reticulations == 0:
+            for network_info in network_info_list:
+                network_info.network.prune()
+                result.append(network_info)
+            return result
+        else:
+            suppress_reticulation_name_iterator = [reticulation_names[index] for index in
+                                                   range(index, len(reticulation_names) - (number_of_reticulations - 0) + 1)]
+            if max_processes == 1:
+                if progress_bar:
+                    for index_2, reticulation_name in tqdm(enumerate(suppress_reticulation_name_iterator), total=len(suppress_reticulation_name_iterator),
+                                                           desc="Computing displayed trees"):
+                        for network_info in network_info_list:
+                            new_network_info_list = cls.suppress_reticulation(network_info.network, reticulation_name)
+                            result.extend(cls._displayed_trees_recursive(
+                                new_network_info_list
+                                , max_processes=1
+                                , progress_bar=False
+                                , reticulation_names=reticulation_names
+                                , index=index + index_2 + 1))
+                else:
+                    for index_2, reticulation_name in enumerate(suppress_reticulation_name_iterator):
+                        for network_info in network_info_list:
+                            new_network_info_list = cls.suppress_reticulation(network_info.network, reticulation_name)
+                            result.extend(cls._displayed_trees_recursive(
+                                new_network_info_list
+                                , max_processes=1
+                                , progress_bar=False
+                                , reticulation_names=reticulation_names
+                                , index=index + index_2 + 1))
+            else:
+                pool = multiprocessing.Pool(max_processes)
+                index_2 = 0
+                if progress_bar:
+                    for new_network_info_list in tqdm(
+                            pool.imap_unordered(
+                                cls._displayed_trees_recursive_helper, zip(suppress_reticulation_name_iterator, itertools.repeat(network_info_list))),
+                            total=len(suppress_reticulation_name_iterator), desc=f"Computing displayed trees using {max_processes} processes"):
+                        result.extend(
+                            cls._displayed_trees_recursive(
+                                new_network_info_list
+                                , max_processes=1
+                                , progress_bar=False
+                                , reticulation_names=reticulation_names
+                                , index=index + index_2 + 1))
+                        index_2 += 1
+                else:
+                    for new_network_info_list in pool.imap_unordered(
+                            cls._displayed_trees_recursive_helper, zip(suppress_reticulation_name_iterator, itertools.repeat(network_info_list))):
+                        result.extend(cls._displayed_trees_recursive(
+                            new_network_info_list
+                            , max_processes=1
+                            , progress_bar=False
+                            , reticulation_names=reticulation_names
+                            , index=index + index_2 + 1
+                        ))
+                        index_2 += 1
+                pool.close()
+                pool.join()
+            return result
+
+    @classmethod
+    def _displayed_trees_recursive_helper(cls, reticulation_network_info_list):
+        reticulation_name, network_info_list = reticulation_network_info_list
+        result = cls(network_size=network_info_list.network_size)
+        for network_info in network_info_list:
+            new_network_info_list = cls.suppress_reticulation(network_info.network, reticulation_name)
+            result.extend(new_network_info_list)
+        return result
+
+    @classmethod
+    def suppress_reticulation(cls, network, reticulation_name):
+        result = cls(network_size=network.number_of_leaves)
+        reticulation_number = network.get_node_number_of(reticulation_name)
+        parents_current_reticulation = network._nodes_above_nodes(children_numbers={reticulation_number}, max_height=1).difference([reticulation_number])
+        for current_parent in parents_current_reticulation:
+            removed_node_numbers = []
+            shifted_reticulation = reticulation_number
+            new_network = copy.deepcopy(network)
+            for other_parent in set(parents_current_reticulation).difference([current_parent]):
+                shifted_other_parent = shifted_node_number(other_parent, removed_node_numbers)
+                shifted_reticulation = shifted_node_number(reticulation_number, removed_node_numbers)
+                new_network._remove_arc(shifted_other_parent, shifted_node_number(shifted_reticulation, removed_node_numbers))
+                in_degree, out_degree = new_network._in_degree_node(shifted_other_parent), new_network._out_degree_node(shifted_other_parent)
+                if out_degree == 0:
+                    removed_node_numbers.extend(new_network._terminate_node(shifted_other_parent))
+                elif out_degree == 1 and in_degree == 1:
+                    new_network._suppress_node(shifted_other_parent)
+                    removed_node_numbers.append(shifted_other_parent)
+                elif in_degree == 0 and out_degree == 1:
+                    removed_node_numbers.extend(new_network._terminate_node(shifted_other_parent))
+            new_network._suppress_node(shifted_node_number(shifted_reticulation, removed_node_numbers))
+            result.append(NetworkInfo(new_network))
+        return result
+
+    @classmethod
+    def induced_strict_tree_set(cls, network: RootedLevelKNetwork, network_size: int, max_processes: int = 1, progress_bar: bool = False):
+        result = cls(network_size=network_size)
+        displayed_trees = cls.displayed_trees(network, max_processes, progress_bar)
+        pool = multiprocessing.Pool(max_processes)
+        if progress_bar:
+            for new_tree_info_list in tqdm(pool.imap_unordered(cls._induced_strict_tree_set_helper, zip(displayed_trees, itertools.repeat(network_size)))
+                    , total=len(displayed_trees)
+                    , desc=f"Computing exhibited trees using {max_processes} processes"):
+                result.extend(new_tree_info_list)
+        else:
+            for new_tree_info_list in pool.imap_unordered(cls._induced_strict_tree_set_helper, zip(displayed_trees, itertools.repeat(network_size))):
+                result.extend(new_tree_info_list)
+        pool.close()
+        pool.join()
+
+        return result
+
+    @classmethod
+    def _induced_strict_tree_set_helper(cls, tree_network_info):
+        tree_info, network_size = tree_network_info
+        return cls.induced_strict_network_set(tree_info.network, network_size, 1, False)
+
+    @classmethod
+    def induced_cluster_set(cls, network: RootedLevelKNetwork, max_processes: int = 1, progress_bar: bool = False):
+        result = cls(network_size=network.number_of_leaves)
+        displayed_trees = cls.displayed_trees(network, max_processes, progress_bar)
+        pool = multiprocessing.Pool(max_processes)
+        if progress_bar:
+            for new_tree_info_list in tqdm(pool.imap_unordered(cls._induced_cluster_set_recursive, displayed_trees)
+                    , total=len(displayed_trees)
+                    , desc=f"Computing exhibited clusters using {max_processes} processes"):
+                result.extend(new_tree_info_list)
+        else:
+            for new_tree_info_list in pool.imap_unordered(cls._induced_cluster_set_recursive, displayed_trees):
+                result.extend(new_tree_info_list)
+        pool.close()
+        pool.join()
+        return result
+
+    @classmethod
+    def _induced_cluster_set_recursive(cls, tree_info: NetworkInfo):
+        result = cls(network_size=tree_info.network.number_of_leaves, lst=[tree_info])
+        sub_tree_info_list = cls._remove_tree_root(tree_info)
+        for sub_tree_info in sub_tree_info_list:
+            result.extend(cls._induced_cluster_set_recursive(sub_tree_info))
+        return result
+
+    @classmethod
+    def _remove_tree_root(cls, tree_info: NetworkInfo):
+        result = cls(network_size=tree_info.network.number_of_leaves)
+        root = tree_info.network._root
+        root_children = tree_info.network._nodes_below_nodes({root}, max_depth=1).difference([root])
+        for root_child in root_children:
+            sub_tree = RootedLevelKNetwork._get_network_below_node(tree_info.network, root_child)
+            result.append(NetworkInfo(sub_tree))
+        return result
+
     #     """Create network set of exhibited networks with n leaves"""
     #     if progress_bar:
     #         progress_bar = tqdm(total=)
@@ -1903,6 +1962,7 @@ class NetworkInfoList:
             edge_to_add_leaf_to_index = np.random.choice(range(len(edges)))
             edge_to_add_leaf_to = edges[edge_to_add_leaf_to_index]
             self[index].network.add_leaf_to_edge(edge_to_add_leaf_to, leaf_to_move)
+            self[index].network.prune()
 
     def switch_leaves_distort(self, prob):
         assert 0 <= prob <= 1, "Probability must be between 0 and 1"
@@ -2003,12 +2063,14 @@ class NetworkInfoList:
     def add_info(self, network_info_list):
         for network_info in self:
             equal_structured_networks, relation_dicts = network_info_list.find_equal_structured_network(network_info.network)
-            # TODO: check if two?
             try:
                 equal_structured_network = equal_structured_networks[0]
+                relation_dict = relation_dicts[0]
                 network_info.add_info(equal_structured_network)
-                network_info['relation_dict'] = relation_dicts[0]
-                network_info['leaf_order'] = network_info.network.leaf_ordering()
+                network_info['cut_arc_sets'] = [[relation_dict[node] for node in cut_arc_set]
+                                                for cut_arc_set in equal_structured_network['cut_arc_sets']]
+                network_info['relation_dict'] = relation_dict
+                network_info['leaf_order'] = network_info.network.leaf_ordering
             except IndexError:
                 network_info.calculate_info()
 
@@ -2019,7 +2081,7 @@ class NetworkInfoList:
                 new_newtork_info = NetworkInfo(new_network)
                 new_newtork_info.multiplicity = network_info.multiplicity
                 result.append(new_newtork_info)
-        result.uniquify(equal_naming=True, count=True)
+        result.uniquify(equal_naming=True, count=False)
         return result
 
     def append(self, other):

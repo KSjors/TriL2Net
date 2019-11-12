@@ -57,15 +57,14 @@ from data.ETS_network import ETS_NETWORK_dict
 if __name__ == '__main__':
     config = {
         'rebuild_generators': 0
-        , 'rebuild_network' : 1
+        , 'rebuild_network' : 0
         , 'network_config'  : {
-            'build_type'     : 'evolve'
-            # dict, enewick, evolve
-            , 'base_net_dict': test_networks.ETS_NETWORK
+            'build_type'     : 'dict'  # dict, enewick, evolve
+            , 'base_net_dict': ETS_NETWORK_dict
             , 'enewick'      : '(a, b)0'
             , 'evolve_config': {
-                'level'               : 2
-                , 'times'             : 20
+                'level'               : 1
+                , 'times'             : 8
                 , 'reticulate_chance' : 0.1
                 , 'termination_chance': 0
             }
@@ -101,62 +100,45 @@ if __name__ == '__main__':
             enewick = '(a, b)0'
             network = RootedLevelKNetwork.from_enewick(enewick)
             network.level = evolve_config['level']
-            network.evolve_times(evolve_config['times'], evolve_config['reticulate_chance'])
+            network.evolve_times(evolve_config['times'], evolve_config['reticulate_chance'], progress_bar=True)
             network.terminate(evolve_config['termination_chance'])
             network.standardize_node_names()
 
         pickle_save("data/network.pickle", network)
     network = pickle_read('data/network.pickle')
-    # network.visualize()
 
-    """ Build or load trinets """
-    # if config['rebuild_network']:
-    #     trinet_info_list = network.network_set(max_processes=6, progress_bar=True)
-    #     pickle_save('data/trinets', trinet_info_list)
-    # trinet_info_list = pickle_read('data/trinets')
+    if config['rebuild_network']:
+        trinet_info_list = NetworkInfoList.induced_strict_network_set(network, 3, 4, True, method='Iterative')
+        pickle_save('data/trinets', trinet_info_list)
+    trinet_info_list = pickle_read('data/trinets')
 
     """ Distort trinets """
-    # if config['rebuild_trinets'] or config['rebuild_network']:
-    #     distorted_trinet_info_list = copy.deepcopy(trinet_info_list)
-    #     trinet_config = config['trinet_config']
-    #     distorted = False
-    #     if trinet_config['replace_network_distort'] != 0:
-    #         distorted_trinet_info_list.replace_network_distort(trinet_config['replace_network_distort'], all_trinet_list)
-    #         distorted = True
-    #     if trinet_config['switch_leaves_distort'] != 0:
-    #         distorted_trinet_info_list.switch_leaves_distort(trinet_config['switch_leaves_distort'])
-    #         distorted = True
-    #     if trinet_config['move_leaf_distort'] != 0:
-    #         distorted_trinet_info_list.move_leaf_distort(trinet_config['move_leaf_distort'])
-    #         distorted = True
-    #     if trinet_config['remove_network_distort'] != 0:
-    #         distorted_trinet_info_list.remove_network_distort(trinet_config['remove_network_distort'])
-    #         distorted = True
-    #     pickle_save('data/distorted_trinets', distorted_trinet_info_list)
-    #     if distorted:
-    #         print(distorted_trinet_info_list.summary())
-    # distorted_trinet_info_list = pickle_read('data/distorted_trinets')
+    if config['rebuild_trinets'] or config['rebuild_network']:
+        distorted_trinet_info_list = copy.deepcopy(trinet_info_list)
+        trinet_config = config['trinet_config']
+        distorted = False
+        if trinet_config['replace_network_distort'] != 0:
+            distorted_trinet_info_list.replace_network_distort(trinet_config['replace_network_distort'], all_trinet_list)
+            distorted = True
+        if trinet_config['switch_leaves_distort'] != 0:
+            distorted_trinet_info_list.switch_leaves_distort(trinet_config['switch_leaves_distort'])
+            distorted = True
+        if trinet_config['move_leaf_distort'] != 0:
+            distorted_trinet_info_list.move_leaf_distort(trinet_config['move_leaf_distort'])
+            distorted = True
+        if trinet_config['remove_network_distort'] != 0:
+            distorted_trinet_info_list.remove_network_distort(trinet_config['remove_network_distort'])
+            distorted = True
+        pickle_save('data/distorted_trinets', distorted_trinet_info_list)
+        if distorted:
+            print(distorted_trinet_info_list.summary())
+    distorted_trinet_info_list = pickle_read('data/distorted_trinets')
 
-    # lst = network.get_exhibited_clusters(progress_bar=True)
-    network.visualize()
-    T1 = 0
-    T2 = 0
-    k = 5
-    for _ in range(k):
-        t1 = time.time()
-        lst1 = NetworkInfoList.exhibited_networks_of_network(network, 3, progress_bar=True, max_processes=4)
-        t2 = time.time()
-        lst2 = NetworkInfoList.exhibited_networks_of_network_2(network, 3, progress_bar=True, max_processes=4)
-        t3 = time.time()
-        T1 += t2 - t1
-        T2 += t3 - t2
+    # network = RootedLevelKNetwork()
+    network.terminate_leaves(leaf_names_to_terminate=['H. californicus', 'H. eggertii', 'H. hirsutus', 'H. laevigatus', 'H. schweinitzii'])
+    network.visualize(internal_node_labels=False, edge_labels=False, rankdir='LR', format='pdf', file_path='ETS_network')
 
-    print(len(lst1), len(lst2))
-    print(T1/k, T2/k)
-
-    # ETS_NETWORK = RootedLevelKNetwork.from_connections_dict(ETS_NETWORK_dict)
-    # print(ETS_NETWORK.full_network_set_consistency(ETS_NETWORK, max_processes=6, progress_bar=True))
-    # # ETS_NETWORK.standardize_node_names()
-    # # ETS_NETWORK = RootedLevelKNetwork.get_network_below_node(ETS_NETWORK, '12')
-    # # ETS_NETWORK.standardize_node_names()
-    # # ETS_NETWORK.visualize(file_path='example_network', internal_node_labels=True, edge_labels=Falsex    , rankdir='LR', format='pdf')
+    # triplet_1 = distorted_trinet_info_list[4].network
+    # triplet_2 = distorted_trinet_info_list[9].network
+    # triplet_1.visualize(internal_node_labels=False, edge_labels=False, rankdir='LR', format='pdf', file_path='example_network_l1_trinet_1')
+    # triplet_2.visualize(internal_node_labels=False, edge_labels=False, rankdir='LR', format='pdf', file_path='example_network_l1_trinet_2')

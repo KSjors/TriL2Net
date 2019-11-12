@@ -148,12 +148,14 @@ def enewick(string):
         string = string[m + 1:]
 
     adjacency_dict = dict()
-    enewick_helper(np.array(result), adjacency_dict)
-    return adjacency_dict
+    leaf_names = set()
+    enewick_helper(np.array(result), adjacency_dict, leaf_names)
+    return adjacency_dict, leaf_names
 
 
-def enewick_helper(string, adjacency_dict):
+def enewick_helper(string, adjacency_dict, leaf_names):
     if len(string) == 1:
+        leaf_names.add(string[0])
         return
 
     root = string[-1]
@@ -174,14 +176,14 @@ def enewick_helper(string, adjacency_dict):
             adjacency_dict[root].extend([left_side[-1], right_side[-1]])
         except KeyError:
             adjacency_dict[root] = [left_side[-1], right_side[-1]]
-        enewick_helper(left_side, adjacency_dict)
-        enewick_helper(right_side, adjacency_dict)
+        enewick_helper(left_side, adjacency_dict, leaf_names)
+        enewick_helper(right_side, adjacency_dict, leaf_names)
     else:
         try:
             adjacency_dict[root].extend([string[-1]])
         except KeyError:
             adjacency_dict[root] = [string[-1]]
-        enewick_helper(string, adjacency_dict)
+        enewick_helper(string, adjacency_dict, leaf_names)
 
 
 def check_bidict(bdict: bidict, first, second) -> bool:

@@ -229,4 +229,20 @@ def shifted_node_number(node_number, other_node_numbers):
     return node_number - sum([other_node_number < node_number for other_node_number in other_node_numbers])
 
 
+def original_node_number(node_number, other_node_numbers):
+    while True:
+        node_numbers_below = [other_node_number for other_node_number in other_node_numbers if other_node_number <= node_number]
+        other_node_numbers = [other_node_number for other_node_number in other_node_numbers if other_node_number > node_number]
+        if len(node_numbers_below) >= 1:
+            node_number += len(node_numbers_below)
+        else:
+            break
+    return node_number
+
+
+def original_node_numbers(node_numbers):
+    result = []
+    for index, node_number in enumerate(node_numbers):
+        result.append(original_node_number(node_number, node_numbers[:index]))
+    return result
 

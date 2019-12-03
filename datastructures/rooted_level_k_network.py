@@ -104,16 +104,17 @@ class RootedLevelKNetwork:
         return result
 
     @classmethod
-    def exhibited_network_on_leaves(cls, network, leaf_names: list, suppress_redundant='all', suppress_parallel=True):
-        return cls._exhibited_network_on_leaves(network, network.get_node_numbers_of(leaf_names), suppress_redundant, suppress_parallel)
+    def restrict(cls, network, leaf_names: list, suppress_redundant='all', suppress_parallel=True):
+        return cls._restrict(network, network.get_node_numbers_of(leaf_names), suppress_redundant, suppress_parallel)
 
     @classmethod
-    def _exhibited_network_on_leaves(cls, network, leaf_numbers: list, suppress_redundant='all', suppress_parallel=True):
+    def _restrict(cls, network, leaf_numbers: list, suppress_redundant='all', suppress_parallel=True):
         assert set(leaf_numbers).issubset(
             set(network.leaf_numbers)), "Can not create sub-network of network {} using {} as they are not leaves of network.".format(
             network.uid,
             leaf_numbers)
         new_network = copy.deepcopy(network)
+        print(network.get_node_names_of(leaf_numbers))
         new_network._terminate_leaves(leaf_numbers_to_keep=leaf_numbers)
         new_network.prune(suppress_redundant=suppress_redundant, suppress_parallel=suppress_parallel)
         return new_network
@@ -489,7 +490,7 @@ class RootedLevelKNetwork:
             self._rename_node(leaf_node, self.first_unused_leaf_name(char_type))
 
     # TODO: to networkinfolist
-    def shrink(self, leaf_names_set) -> list:
+    def collapse(self, leaf_names_set) -> list:
         """Returns list of shrunken networks"""
         intersection = set(self.leaf_names).intersection(leaf_names_set)
         if len(intersection) == len(self.leaf_names):
@@ -498,9 +499,9 @@ class RootedLevelKNetwork:
             return [copy.deepcopy(self)]
         leaf_numbers_set = set(self.get_node_numbers_of(list(intersection)))
         mss_name = mss_leaf_name(leaf_names_set)
-        return self._shrink(leaf_numbers_set, mss_name)
+        return self._collapse(leaf_numbers_set, mss_name)
 
-    def _shrink(self, leaf_numbers_set: set, new_name: str) -> list:
+    def _collapse(self, leaf_numbers_set: set, new_name: str) -> list:
         result = []
         for leaf_to_keep in leaf_numbers_set:
             new_network = copy.deepcopy(self)
@@ -645,9 +646,12 @@ class RootedLevelKNetwork:
         leaf_numbers_to_keep = coalesce(leaf_numbers_to_keep, [])
         if len(leaf_numbers_to_terminate) == 0:
             leaf_numbers_to_terminate = sorted(list(set(self.leaf_numbers).difference(leaf_numbers_to_keep)), reverse=True)
-        for leaf_index in range(len(leaf_numbers_to_terminate)):
-            removed_nodes_numbers = self._terminate_node(leaf_numbers_to_terminate[leaf_index], [])
-            leaf_numbers_to_terminate = [shifted_node_number(leaf_number, removed_nodes_numbers) for leaf_number in leaf_numbers_to_terminate]
+        all_removed_node_numbers = []
+        print(self.get_node_names_of(leaf_numbers_to_terminate))
+        for current_leaf in leaf_numbers_to_terminate:
+            print()
+            self._terminate_node(current_leaf, all_removed_node_numbers)
+
 
     def _terminate_leaf(self, leaf_number: int):
         """Remove leaf and prune to make a proper network again"""
@@ -1125,31 +1129,27 @@ class RootedLevelKNetwork:
     def _terminate_node(self, node_number: int, removed_node_numbers: list = None) -> list:
         removed_node_numbers = coalesce(removed_node_numbers, [])
         node_number = shifted_node_number(node_number, removed_node_numbers)
+        print(f"Terminating node {self.get_node_name_of(node_number)}")
 
-        if self._is_leaf_node(node_number) or self._is_reticulation_node(node_number):
-            parent_numbers = self._nodes_above_nodes({node_number}, max_height=1).difference([node_number])
+        children_numbers = self._nodes_below_nodes({node_number}, max_depth=1).difference([node_number])
+        parent_numbers = self._nodes_above_nodes({node_number}, max_height=1).difference([node_number])
+        if len(children_numbers) == 0:
+            print("Node is a dead end")
             self._remove_node_from_network(node_number)
             removed_node_numbers.append(node_number)
-            for node_number in parent_numbers:
-                self._terminate_node(node_number, removed_node_numbers)
-        elif self._is_root_node(node_number):
-            children_numbers = self._nodes_below_nodes({node_number}, max_depth=1).difference([node_number])
-            if len(children_numbers) == 1:
-                self._remove_node_from_network(node_number)
-                removed_node_numbers.append(node_number)
-        else:
-            children_numbers = self._nodes_below_nodes({node_number}, max_depth=1).difference([node_number])
+            for p_node_number in parent_numbers:
+                self._terminate_node(p_node_number, removed_node_numbers)
 
-            if len(children_numbers) == 1:
-                self._suppress_node(node_number)
-                removed_node_numbers.append(node_number)
-            elif len(children_numbers) == 0:
-                parent_numbers = self._nodes_above_nodes({node_number}, max_height=1).difference([node_number])
-                self._remove_node_from_network(node_number)
-                removed_node_numbers.append(node_number)
-                for node_number in parent_numbers:
-                    self._terminate_node(node_number, removed_node_numbers)
-        return removed_node_numbers
+        elif len(parent_numbers) == 0 and len(children_numbers) == 1:
+            print("Node is a dead root")
+            self._remove_node_from_network(node_number)
+            removed_node_numbers.append(node_number)
+        elif len(parent_numbers) == 1 and len(children_numbers) == 1:
+            print("Node is suppressable")
+            self._suppress_node(node_number)
+            removed_node_numbers.append(node_number)
+
+        return original_node_numbers(removed_node_numbers)
 
     def prune(self, suppress_redundant: str = 'all', suppress_parallel: bool = True):
         """Suppress al unnecessary/redundant/parallel nodes/edges in network."""
@@ -1557,8 +1557,8 @@ class NetworkInfo:
         self.info = coalesce(info, dict())
         self.multiplicity = 1
 
-    def shrink(self, leaf_set) -> list:
-        new_networks = self.network.shrink(leaf_set)
+    def collapse(self, leaf_set) -> list:
+        new_networks = self.network.collapse(leaf_set)
         return new_networks
 
     def calculate_info(self):
@@ -1571,8 +1571,8 @@ class NetworkInfo:
             self.info[key] = value
 
     @classmethod
-    def limit_to(cls, network_info, leaf_names):
-        network = RootedLevelKNetwork.exhibited_network_on_leaves(network_info.network, leaf_names=leaf_names, suppress_parallel=True, suppress_redundant='all')
+    def restrict(cls, network_info, leaf_names):
+        network = RootedLevelKNetwork.restrict(network_info.network, leaf_names=leaf_names, suppress_parallel=True, suppress_redundant='all')
         result = cls(network)
         return result
 
@@ -1608,15 +1608,28 @@ class NetworkInfo:
 
 
 class NetworkInfoList:
-    def __init__(self, network_size: int, lst: list = None):
+    def __init__(self, network_size: int = None, lst: list = None):
+        # Set up logging
         self.uid = guid()
         self.logger = logging.getLogger('network_info_list.{}'.format(self.uid))
         self.logger.debug(f"Created NetworkInfoList ({self.uid})")
+
         self.list = coalesce(lst, [])
         self.network_size = network_size
 
     @classmethod
-    def exhibited_networks_of_network_info_list(cls, network_info_list, network_size: int, max_processes: int = 1, progress_bar: bool = False):
+    def collapse(cls, network_info_list, leaf_set: set):
+        result = cls(network_size=network_info_list.network_size)
+        for network_info in network_info_list:
+            for new_network in network_info.collapse(leaf_set):
+                new_network_info = NetworkInfo(new_network)
+                new_network_info.multiplicity = network_info.multiplicity
+                result.append(new_network_info)
+        return result
+
+    @classmethod
+    def induced_networks_of_network_info_list(cls, network_info_list, network_size: int, max_processes: int = 1, progress_bar: bool = False):
+        """ Network list containing all exhibited networks of networks in list of certain size """
         assert network_size < network_info_list.network_size, "Can only create smaller network info lists with smaller network size."
         result = cls(network_size)
         for network_info in network_info_list:
@@ -1626,6 +1639,7 @@ class NetworkInfoList:
     @classmethod
     def induced_strict_network_set(cls, network: RootedLevelKNetwork, network_size: int, max_processes: int = 1, progress_bar: bool = False,
                                    method='Recursive'):
+        """ Network list containing all exhibited network of network of certain size """
         if method == 'Recursive':
             return cls._induced_strict_network_set_recursive(network, network_size, max_processes, progress_bar, network.leaf_names, 0)
         elif method == 'Iterative':
@@ -1663,7 +1677,7 @@ class NetworkInfoList:
                 index_2 = 0
                 if progress_bar:
                     for new_network in tqdm(
-                            pool.imap_unordered(cls._induced_strint_network_set_recursive_helper, zip(terminate_leaf_name_iterator, itertools.repeat(network))),
+                            pool.imap_unordered(cls._induced_strict_network_set_recursive_helper, zip(terminate_leaf_name_iterator, itertools.repeat(network))),
                             total=len(terminate_leaf_name_iterator), desc=f"Computing exhibited trinets recursively using {max_processes} processes"):
                         result.extend(cls._induced_strict_network_set_recursive(
                             new_network
@@ -1675,7 +1689,7 @@ class NetworkInfoList:
                         index_2 += 1
                 else:
                     for new_network in pool.imap_unordered(
-                            cls._induced_strint_network_set_recursive_helper, zip(terminate_leaf_name_iterator, itertools.repeat(network))):
+                            cls._induced_strict_network_set_recursive_helper, zip(terminate_leaf_name_iterator, itertools.repeat(network))):
                         result.extend(cls._induced_strict_network_set_recursive(
                             new_network
                             , network_size
@@ -1689,7 +1703,7 @@ class NetworkInfoList:
             return result
 
     @classmethod
-    def _induced_strint_network_set_recursive_helper(cls, leaf_network):
+    def _induced_strict_network_set_recursive_helper(cls, leaf_network):
         terminate_leaf_name, network = leaf_network
         new_network = copy.deepcopy(network)
         new_network.terminate_leaf(terminate_leaf_name)
@@ -1715,23 +1729,7 @@ class NetworkInfoList:
     @classmethod
     def _induced_strict_network_set_iterative_helper(cls, n_set_network):
         n_set, network = n_set_network
-        return RootedLevelKNetwork._exhibited_network_on_leaves(network, n_set)
-
-    # @classmethod
-    # def displayed_networks(cls, network: RootedLevelKNetwork, max_level: int = 0, max_processes: int = 1, progress_bar: bool = False):
-    #     result = cls(network_size=network.number_of_leaves)
-    #     biconnected_components = network._biconnected_components
-    #     reticulations_of_biconnected_components = [network._reticulations_of_component(biconnected_component)
-    #                                                for biconnected_component in biconnected_components]
-    #     networks = [network]
-    #     for biconnected_component, reticulations_of_biconnected_component in zip(biconnected_components, reticulations_of_biconnected_components):
-    #         level = len(reticulations_of_biconnected_component)
-    #         if level > max_level:
-    #             reticulations_to_suppress_iterator = itertools.combinations(reticulations_of_biconnected_component, level - max_level)
-    #             for reticulations_to_suppress in reticulations_to_suppress_iterator:
-    #                 new_network = copy.deepcopy(network)
-    #                 for reticulation_to_suppress in reticulations_to_suppress:
-    #                     new_network.suppress_reticulation(reticulation_to_suppress)
+        return RootedLevelKNetwork._restrict(network, n_set)
 
     @classmethod
     def displayed_trees(cls, network: RootedLevelKNetwork, max_processes: int = 1, progress_bar: bool = False):
@@ -1896,50 +1894,7 @@ class NetworkInfoList:
             result.append(NetworkInfo(sub_tree))
         return result
 
-    #     """Create network set of exhibited networks with n leaves"""
-    #     if progress_bar:
-    #         progress_bar = tqdm(total=)
-    #         full_trees = cls.
-    #         progress_bar.close()
-    #
-    #     leaves = network.leaf_numbers
-    #     total = int(scipy.special.comb(len(leaves), network_size))
-    #     n_set = list(itertools.combinations(leaves, network_size))
-    #
-    #     pool = multiprocessing.Pool(max_processes)
-    #     result = cls(network_size=network_size)
-    #     if progress_bar:
-    #         for x in tqdm(pool.imap_unordered(network._exhibited_network_on_leaves, n_set), total=total, desc=f"Computing network set  ({network_size})"):
-    #             result.append(NetworkInfo(x))
-    #     else:
-    #         for x in pool.imap_unordered(network._exhibited_network_on_leaves, n_set):
-    #             result.append(NetworkInfo(x))
-    #     pool.close()
-    #     pool.join()
-    #     return result
-
-    def uniquify(self, equal_naming=False, count=True, progress_bar=False):
-        indici_to_remove = set()
-        if progress_bar:
-            pbar = tqdm(total=len(self), desc=f"Uniquifying network set")
-        for index_1, network_info_1 in enumerate(self):
-            if index_1 in indici_to_remove:
-                continue
-            if progress_bar:
-                pbar.update()
-            for index_2, network_info_2 in enumerate(self[index_1 + 1:]):
-                equal_structure, _, _ = network_info_1.network.equal_structure(network_info_2.network, equal_naming=equal_naming)
-                if equal_structure:
-                    indici_to_remove.add(index_1 + index_2 + 1)
-                    if progress_bar:
-                        pbar.update()
-                    if count:
-                        network_info_1.multiplicity += network_info_2.multiplicity
-        if progress_bar:
-            pbar.close()
-        for index in sorted(list(indici_to_remove), reverse=True):
-            self.pop(index)
-
+    # -------------------------------- NOISE METHODS -------------------------------#
     def replace_network_distort(self, prob, network_pool):
         assert 0 <= prob <= 1, "Probability must be between 0 and 1"
         amount = np.random.binomial(len(self), prob)
@@ -1951,35 +1906,13 @@ class NetworkInfoList:
                 replacement_network.network.rename_node(old_name, new_name)
             self[index] = replacement_network
 
-    def move_leaf_distort(self, prob):
-        assert 0 <= prob <= 1, "Probability must be between 0 and 1"
-        amount = np.random.binomial(len(self), prob)
-        networks_to_distort = np.random.choice(range(len(self)), amount, replace=False)
-        for index in networks_to_distort:
-            leaf_to_move = np.random.choice(self[index].network.leaf_names)
-            self[index].network.terminate_leaf(leaf_to_move)
-            edges = self[index].network.edges
-            edge_to_add_leaf_to_index = np.random.choice(range(len(edges)))
-            edge_to_add_leaf_to = edges[edge_to_add_leaf_to_index]
-            self[index].network.add_leaf_to_edge(edge_to_add_leaf_to, leaf_to_move)
-            self[index].network.prune()
-
-    def switch_leaves_distort(self, prob):
-        assert 0 <= prob <= 1, "Probability must be between 0 and 1"
-        amount = np.random.binomial(len(self), prob)
-        networks_to_distort = np.random.choice(range(len(self)), amount, replace=False)
-        for index in networks_to_distort:
-            leaves_to_switch = np.random.choice(self[index].network.leaf_names, size=2, replace=False)
-            self[index].network.rename_node(leaves_to_switch[0], leaves_to_switch[0] + "*")
-            self[index].network.rename_node(leaves_to_switch[1], leaves_to_switch[0])
-            self[index].network.rename_node(leaves_to_switch[0] + "*", leaves_to_switch[1])
-
     def remove_network_distort(self, prob):
-        assert 0 <= prob <= 1, "Probability must be between 0 and 1"
-        amount = np.random.binomial(len(self), prob)
-        networks_to_distort = np.random.choice(range(len(self)), amount, replace=False)
-        for index in sorted(networks_to_distort, reverse=True):
-            self.pop(index)
+        pass
+        # TODO
+
+    def tail_move_distort(self, prob):
+        pass
+        # TODO
 
     def _analyse_networks(self) -> (dict, float, float, float):
         all_leaves = self.represented_leaves()
@@ -2023,7 +1956,7 @@ class NetworkInfoList:
 
         covered_networks, redundancy, density, inconsistency_0 = self._analyse_networks()
 
-        network_info_list_1 = NetworkInfoList.exhibited_networks_of_network_info_list(self, self.network_size - 1)
+        network_info_list_1 = NetworkInfoList.induced_networks_of_network_info_list(self, self.network_size - 1)
         covered_networks_1, _, _, inconsistency_1 = network_info_list_1._analyse_networks()
 
         summary = \
@@ -2050,9 +1983,8 @@ class NetworkInfoList:
         return summary
 
     def is_consistent(self) -> bool:
-        all_leaves = self.represented_leaves()
         _, redundancy, density, inconsistency_0 = self._analyse_networks()
-        network_info_list_1 = NetworkInfoList.exhibited_networks_of_network_info_list(self, self.network_size - 1)
+        network_info_list_1 = NetworkInfoList.induced_networks_of_network_info_list(self, self.network_size - 1)
         covered_networks_1, _, _, inconsistency_1 = network_info_list_1._analyse_networks()
         return bool(redundancy == 0.0 and density == 1.0 and inconsistency_0 == 0.0 and inconsistency_1 == 0.0)
 
@@ -2074,20 +2006,17 @@ class NetworkInfoList:
             except IndexError:
                 network_info.calculate_info()
 
-    def shrink(self, leaf_set):
-        result = NetworkInfoList(network_size=self.network_size)
-        for network_info in self:
-            for new_network in network_info.shrink(leaf_set):
-                new_newtork_info = NetworkInfo(new_network)
-                new_newtork_info.multiplicity = network_info.multiplicity
-                result.append(new_newtork_info)
-        result.uniquify(equal_naming=True, count=False)
-        return result
-
-    def append(self, other):
+    # ------------------ ADD METHODS -------------------- #
+    def append(self, other: NetworkInfo):
         assert type(other) == NetworkInfo, "Can only add object of type NetworkInfo to a NetworkInfoList"
         assert len(other.network.leaf_names) <= self.network_size, \
             f"Can only add network with less or equal than {self.network_size} leaves to this NetworkInfoList, this network has {len(other.network.leaf_names)} leaves"
+
+        for network_info in self:
+            are_equal, relation_dict, leaf_translation_dicts = network_info.network.equal_structure(other.network, equal_naming=True, optimize=False)
+            if are_equal:
+                network_info.multiplicity += other.multiplicity
+                return
         self.list.append(other)
 
     def extend(self, other):
@@ -2100,6 +2029,13 @@ class NetworkInfoList:
         result.extend(other)
         return result
 
+    def remove(self, other):
+        self.list.remove(other)
+
+    def pop(self, index):
+        self.list.pop(index)
+
+    # ----------------- FIND NETWORK METHODS ------------------- #
     def find_equal_structured_network(self, network):
         result = NetworkInfoList(network_size=self.network_size)
         relation_dicts = []
@@ -2139,7 +2075,7 @@ class NetworkInfoList:
         for network_info in self:
             overlap = set(leaf_names).intersection(network_info.network.leaf_names)
             if len(overlap) >= 2:
-                result.append(NetworkInfo.limit_to(network_info, list(overlap)))
+                result.append(NetworkInfo.restrict(network_info, list(overlap)))
         return result
 
     def networks_where(self, category, value):
@@ -2175,18 +2111,6 @@ class NetworkInfoList:
         for network_info in self:
             result.update(network_info.network.leaf_names)
         return result
-
-    def __add__(self, other):
-        result = copy.deepcopy(self)
-        for oth in other:
-            result.append(oth)
-        return result
-
-    def remove(self, other):
-        self.list.remove(other)
-
-    def pop(self, index):
-        self.list.pop(index)
 
     def __getitem__(self, key):
         return self.list[key]

@@ -59,17 +59,17 @@ if __name__ == '__main__':
         'rebuild_generators': 0
         , 'rebuild_network' : 0
         , 'network_config'  : {
-            'build_type'     : 'dict'  # dict, enewick, evolve
+            'build_type'     : 'evolve'  # dict, enewick, evolve
             , 'base_net_dict': ETS_NETWORK_dict
             , 'enewick'      : '(a, b)0'
             , 'evolve_config': {
-                'level'               : 1
-                , 'times'             : 8
-                , 'reticulate_chance' : 0.1
+                'level'               : 2
+                , 'times'             : 20
+                , 'reticulate_chance' : 0.3
                 , 'termination_chance': 0
             }
         }
-        , 'rebuild_trinets' : 0
+        , 'rebuild_trinets' : 1
         , 'trinet_config'   : {
             'replace_network_distort' : 0
             , 'switch_leaves_distort' : 0
@@ -106,9 +106,13 @@ if __name__ == '__main__':
 
         pickle_save("data/network.pickle", network)
     network = pickle_read('data/network.pickle')
+    # network.visualize()
+    n = RootedLevelKNetwork.restrict(network, ['c', 'a', 'l'])
+    n.visualize()
+    kk
 
-    if config['rebuild_network']:
-        trinet_info_list = NetworkInfoList.induced_strict_network_set(network, 3, 4, True, method='Iterative')
+    if config['rebuild_trinets'] or config['rebuild_network']:
+        trinet_info_list = NetworkInfoList.induced_strict_network_set(network, 3, 1, True, method='Iterative')
         pickle_save('data/trinets', trinet_info_list)
     trinet_info_list = pickle_read('data/trinets')
 
@@ -134,9 +138,18 @@ if __name__ == '__main__':
             print(distorted_trinet_info_list.summary())
     distorted_trinet_info_list = pickle_read('data/distorted_trinets')
 
+    network.visualize()
+    solver = Solver(all_trinet_list, distorted_trinet_info_list)
+    solver.solve()
+
+
+
+
+
+
     # network = RootedLevelKNetwork()
-    network.terminate_leaves(leaf_names_to_terminate=['H. californicus', 'H. eggertii', 'H. hirsutus', 'H. laevigatus', 'H. schweinitzii'])
-    network.visualize(internal_node_labels=False, edge_labels=False, rankdir='LR', format='pdf', file_path='ETS_network')
+    # network.terminate_leaves(leaf_names_to_terminate=['H. californicus', 'H. eggertii', 'H. hirsutus', 'H. laevigatus', 'H. schweinitzii'])
+    # network.visualize(internal_node_labels=False, edge_labels=False, rankdir='LR', format='pdf', file_path='ETS_network')
 
     # triplet_1 = distorted_trinet_info_list[4].network
     # triplet_2 = distorted_trinet_info_list[9].network

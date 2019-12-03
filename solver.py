@@ -12,20 +12,28 @@ import time
 class Solver:
     def __init__(self, standard_trinet_info_list, trinet_info_list: NetworkInfoList, leaf_locator: str = 'normal', is_main=True):
         assert leaf_locator in ('normal', 'ILP')
+
+        # Set up logging
         self.uid = guid()
         self.logger_name = f"solver.{self.uid}"
-        self.is_main = is_main
         self.logger = logging.getLogger(self.logger_name)
+
+        # Save config
+        self.is_main = is_main
         self.leaf_locator = leaf_locator
+
+        # Set up data
         self.standard_trinet_info_list = standard_trinet_info_list
         self.trinet_info_list = trinet_info_list
-
         self.taxa = trinet_info_list.represented_leaves()
+
+        # Set up step output array
         self.steps = []
 
         self.logger.info(f"Created solver for list of {len(self.trinet_info_list)} trinets representing taxa {self.taxa}")
 
     def solve(self) -> RootedLevelKNetwork:
+        """ Solve """
         self.logger.info('Started solving')
         self.logger.info('Shrinking ...')
         self.trinet_info_list.add_info(self.standard_trinet_info_list)
@@ -47,6 +55,7 @@ class Solver:
             return False
         elif len(leaves_leftover) == 2:
             minimal_sink_sets = [leaves_leftover]
+            self.logger.info(f"Inconsistency: Score of minimal sink-set is 100%")
         else:
             auxiliary_graph = Omega.from_network_info_list(self.trinet_info_list.networks_of_size(3))
             minimal_sink_sets, mss_score = auxiliary_graph.minimal_sink_sets()
@@ -69,12 +78,11 @@ class Solver:
         self.logger.info(f"Shrinking minimal sink-set {minimal_sink_set}")
         steps = self.compute_network_of_mss(minimal_sink_set)
         for step in steps:
-
             self.steps.append(step)
             # if self.is_main:
             #     step['network'].visualize()
             if step['type'] == 'shrink':
-                self.trinet_info_list = self.trinet_info_list.shrink(step['leaf_set'])
+                self.trinet_info_list = self.trinet_info_list.collapse(step['leaf_set'])
         self.trinet_info_list.add_info(self.standard_trinet_info_list)
 
     def compute_level_of_network_list(self, network_list: NetworkInfoList, max_level: int = 2):
@@ -558,7 +566,9 @@ class Solver:
         side_orders = ([[] for _ in range(sides)])
         placed_leaves = []
         leaf_order_scores = {side: dict() for side in range(sides)}
-
+        time.sleep(1)
+        print(leaf_order_matrix)
+        time.sleep(1)
         # place all leaves with similar lineage on the same side
         for _ in [0, 1]:
             # 0 --> check lineage below

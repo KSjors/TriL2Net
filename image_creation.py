@@ -37,6 +37,6 @@ from mip import model
 from data.ETS_network import ETS_NETWORK_dict
 
 
-enewick = "(c, (b, c)1)0"
+enewick = "(a, b)0"
 network = RootedLevelKNetwork.from_enewick(enewick, check_valid=False)
-network.visualize(internal_node_labels=False, edge_labels=False, rankdir='LR', format='pdf', file_path='extinction_example_p2')
+network.visualize(internal_node_labels=True, edge_labels=False, rankdir='LR', format='pdf', file_path='generator0')

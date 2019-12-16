@@ -1,7 +1,45 @@
 digraph {
-	graph [rankdir=LR]
+	graph [rankdir=TB]
 	0 [label=0 height=0.5 width=0.5]
 	1 [label=1 height=0.5 width=0.5]
+	3 [label=3 height=0.5 width=0.5]
+	6 [label=6 height=0.5 width=0.5]
+	8 [label=8 height=0.5 width=0.5]
+	9 [label=9 height=0.5 width=0.5]
+	10 [label=10 height=0.5 width=0.5]
+	2 [label=2 height=0.5 width=0.5]
+	4 [label=4 height=0.5 width=0.5]
+	7 [label=7 height=0.5 width=0.5]
+	5 [label=5 height=0.5 width=0.5]
+	a [label=a height=0.5 width=0.5]
+	b [label=b height=0.5 width=0.5]
+	g [label=g height=0.5 width=0.5]
+	f [label=f height=0.5 width=0.5]
+	i [label=i height=0.5 width=0.5]
+	j [label=j height=0.5 width=0.5]
+	c [label=c height=0.5 width=0.5]
+	d [label=d height=0.5 width=0.5]
+	e [label=e height=0.5 width=0.5]
+	h [label=h height=0.5 width=0.5]
 	0 -> 1
-	0 -> 1
+	0 -> 2
+	1 -> 3
+	1 -> a
+	3 -> 6
+	3 -> b
+	6 -> 8
+	6 -> 9
+	8 -> g
+	8 -> f
+	9 -> 10
+	9 -> i
+	10 -> j
+	2 -> 4
+	2 -> 5
+	4 -> 7
+	4 -> c
+	7 -> d
+	7 -> e
+	5 -> 10
+	5 -> h
 }

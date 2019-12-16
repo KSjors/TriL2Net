@@ -22,22 +22,10 @@ fh.setFormatter(formatter)
 logging.getLogger('').addHandler(console)
 logging.getLogger('network').addHandler(fh)
 
-import os
-import data.test_networks as test_networks
-from datastructures.rooted_level_k_network import RootedLevelKNetwork, NetworkInfoList
-from solver import Solver
-import data.generators as generator
-from data.all_trinets import get_standard_networks, regenerate_standard_networks, pickle_save, pickle_read
-from utils.help_functions import *
-import timeit
-from tqdm import tqdm
-import matplotlib.pyplot as plt
-import scipy.stats as stats
-from mip import model
-from data.ETS_network import ETS_NETWORK_dict
+from datastructures.rooted_level_k_network import RootedLevelKNetwork, NetworkSet
 
 if __name__ == "__main__":
     network = RootedLevelKNetwork.random(50, 0, 2)
 
-    trinets = NetworkInfoList.induced_strict_network_set(network, 3, 4, True, method='Recursive')
-    trinets_2 = NetworkInfoList.induced_strict_network_set(network, 3, 4, True, method='Iterative')
+    trinets = NetworkSet.induced_strict_network_set(network, 3, 4, True, method='Recursive')
+    trinets_2 = NetworkSet.induced_strict_network_set(network, 3, 4, True, method='Iterative')

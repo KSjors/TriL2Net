@@ -41,17 +41,9 @@ logging.getLogger('').addHandler(console)
 logging.getLogger('network').addHandler(fh)
 
 import os
-import data.test_networks as test_networks
-from datastructures.rooted_level_k_network import RootedLevelKNetwork, NetworkInfoList
-from solver import Solver
-import data.generators as generator
+from datastructures.rooted_level_k_network import RootedLevelKNetwork, NetworkSet
 from data.all_trinets import get_standard_networks, regenerate_standard_networks, pickle_save, pickle_read
 from utils.help_functions import *
-import timeit
-from tqdm import tqdm
-import matplotlib.pyplot as plt
-import scipy.stats as stats
-from mip import model
 from data.ETS_network import ETS_NETWORK_dict
 
 if __name__ == '__main__':
@@ -69,7 +61,7 @@ if __name__ == '__main__':
                 , 'termination_chance': 0
             }
         }
-        , 'rebuild_trinets' : 1
+        , 'rebuild_trinets' : 0
         , 'trinet_config'   : {
             'replace_network_distort' : 0
             , 'switch_leaves_distort' : 0
@@ -101,18 +93,16 @@ if __name__ == '__main__':
             network = RootedLevelKNetwork.from_enewick(enewick)
             network.level = evolve_config['level']
             network.evolve_times(evolve_config['times'], evolve_config['reticulate_chance'], progress_bar=True)
-            network.terminate(evolve_config['termination_chance'])
+            network.terminate_percentage_leaves(evolve_config['termination_chance'])
             network.standardize_node_names()
 
         pickle_save("data/network.pickle", network)
     network = pickle_read('data/network.pickle')
-    # network.visualize()
-    n = RootedLevelKNetwork.restrict(network, ['c', 'a', 'l'])
-    n.visualize()
-    kk
+    if config['rebuild_network']:
+        network.visualize()
 
     if config['rebuild_trinets'] or config['rebuild_network']:
-        trinet_info_list = NetworkInfoList.induced_strict_network_set(network, 3, 1, True, method='Iterative')
+        trinet_info_list = NetworkSet.induced_strict_network_set(network, 3, 1, True, method='Iterative')
         pickle_save('data/trinets', trinet_info_list)
     trinet_info_list = pickle_read('data/trinets')
 
@@ -122,7 +112,7 @@ if __name__ == '__main__':
         trinet_config = config['trinet_config']
         distorted = False
         if trinet_config['replace_network_distort'] != 0:
-            distorted_trinet_info_list.replace_network_distort(trinet_config['replace_network_distort'], all_trinet_list)
+            distorted_trinet_info_list.uniform_distort(trinet_config['replace_network_distort'], all_trinet_list)
             distorted = True
         if trinet_config['switch_leaves_distort'] != 0:
             distorted_trinet_info_list.switch_leaves_distort(trinet_config['switch_leaves_distort'])
@@ -131,16 +121,22 @@ if __name__ == '__main__':
             distorted_trinet_info_list.move_leaf_distort(trinet_config['move_leaf_distort'])
             distorted = True
         if trinet_config['remove_network_distort'] != 0:
-            distorted_trinet_info_list.remove_network_distort(trinet_config['remove_network_distort'])
+            distorted_trinet_info_list.deletion_distort(trinet_config['remove_network_distort'])
             distorted = True
         pickle_save('data/distorted_trinets', distorted_trinet_info_list)
         if distorted:
             print(distorted_trinet_info_list.summary())
     distorted_trinet_info_list = pickle_read('data/distorted_trinets')
 
+    # network.visualize()
+    # solver = Solver(all_trinet_list, distorted_trinet_info_list)
+    # network_result = solver.solve()
+    # print(network.equal_structure(network_result))
+
+    movable_arcs = network.movable_arcs
+    print(movable_arcs)
+    network.tail_move(('16', 'f'),  movable_arcs[1])
     network.visualize()
-    solver = Solver(all_trinet_list, distorted_trinet_info_list)
-    solver.solve()
 
 
 

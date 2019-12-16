@@ -5,7 +5,7 @@ import itertools
 import time
 from tqdm import tqdm
 import copy
-from datastructures.rooted_level_k_network import NetworkInfoList, NetworkInfo, RootedLevelKNetwork
+from datastructures.rooted_level_k_network import NetworkSet, NetworkInfo, RootedLevelKNetwork
 
 
 def pickle_save(filename, data):
@@ -33,8 +33,8 @@ def regenerate_standard_networks() -> None:
     }
 
     # Get biconnected binets and trinets for each generator
-    biconnected_trinet_list = NetworkInfoList(network_size=3)
-    biconnected_binet_list = NetworkInfoList(network_size=3)
+    biconnected_trinet_list = NetworkSet(network_size=3, equal_naming=False)
+    biconnected_binet_list = NetworkSet(network_size=3, equal_naming=False)
     for level, generator_list in all_generators.items():
         for generator in generator_list:
             generator_trinet_info_list = generator.build_trinets()
@@ -42,11 +42,11 @@ def regenerate_standard_networks() -> None:
             biconnected_trinet_list.extend(generator_trinet_info_list)
             biconnected_binet_list.extend(generator_binet_info_list)
 
-    biconnected_trinet_list.uniquify(count=False)
-    biconnected_binet_list.uniquify(count=False)
+    biconnected_trinet_list.set_multiplicities_to_one()
+    biconnected_binet_list.set_multiplicities_to_one()
 
     # From binets create trinets with two biconnected components
-    two_component_trinet_list = NetworkInfoList(network_size=3)
+    two_component_trinet_list = NetworkSet(network_size=3)
     two_binet_infos_iterator = itertools.combinations(biconnected_binet_list, 2)
     for binet_infos in two_binet_infos_iterator:
         previous_two_component_trinet = None
@@ -59,7 +59,7 @@ def regenerate_standard_networks() -> None:
 
     two_component_trinet_list.extend(biconnected_trinet_list)
     biconnected_trinet_list.extend(biconnected_binet_list)
-    two_component_trinet_list.uniquify(count=False)
+    two_component_trinet_list.set_multiplicities_to_one()
     biconnected_trinet_list.calculate_info()
     two_component_trinet_list.calculate_info()
 
@@ -69,7 +69,7 @@ def regenerate_standard_networks() -> None:
     pickle_out.close()
 
 
-def get_standard_networks() -> (list, NetworkInfoList):
+def get_standard_networks() -> (list, NetworkSet):
     """Read and retrieve all possible trinets."""
     logging.debug("Reading and retrieving all possible trinets.")
     pickle_in = open("data/all_networks_save.pickle", 'rb')

@@ -33,7 +33,7 @@ B_necessary = []
 generator_B = RootedLevelKGenerator(name='2b', dir_adj_matrix=B, symmetrical_nodes=B_symmetries, level=2)
 
 C = np.array([[0, 1, 1, 0, 0, 0, 0], [0, 0, 0, 1, 1, 0, 0], [0, 0, 0, 1, 1, 0, 0], [0, 0, 0, 0, 0, 1, 0], [0, 0, 0, 0, 0, 0, 1]])
-C_symmetries = bidict({1: 2, 3: 4})
+C_symmetries = bidict({1: 2})
 C_necessary = []
 generator_C = RootedLevelKGenerator(name='2c', dir_adj_matrix=C, symmetrical_nodes=C_symmetries, level=2)
 
@@ -42,7 +42,9 @@ D_symmetries = bidict()
 D_necessary = [['1', '3']]
 generator_D = RootedLevelKGenerator(name='2d', dir_adj_matrix=D, symmetrical_nodes=D_symmetries, level=2)
 
-sides_per_edge_per_generator = {
+generator_dict = {'0': generator_level0, '1': generator_level1, '2a': generator_A, '2b': generator_B, '2c': generator_C, '2d': generator_D}
+
+symmetric_sides_sets_per_generator = {
     '1': {
             ('0', '1'): [('0', '1'), ('0', '1')]
         },

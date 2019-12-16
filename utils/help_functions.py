@@ -142,10 +142,14 @@ def enewick(string):
         except ValueError:
             space_index = len(string) - 1
         m = min([left_bracket_index, right_bracket_index, comma_index, space_index])
-        if len(string[:m]) > 0:
-            result.append(string[:m])
-        result.append(string[m])
-        string = string[m + 1:]
+        if left_bracket_index == right_bracket_index == comma_index == space_index:
+            result.append(string)
+            string = []
+        else:
+            if len(string[:m]) > 0:
+                result.append(string[:m])
+            result.append(string[m])
+            string = string[m + 1:]
 
     adjacency_dict = dict()
     leaf_names = set()

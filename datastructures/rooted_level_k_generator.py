@@ -1,4 +1,4 @@
-from datastructures.rooted_level_k_network import RootedLevelKNetwork, NetworkInfoList, NetworkInfo
+from datastructures.rooted_level_k_network import RootedLevelKNetwork, NetworkSet, NetworkInfo
 import numpy as np
 from utils.help_functions import guid
 import itertools
@@ -23,12 +23,12 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
 
         # --------- Trinets -----------
         # Create iterator of possible combinations of leaves to add
-        all_edges = base_net.internal_edges
+        all_edges = base_net.internal_arcs
         number_of_generator_leaves = len(base_net.leaf_numbers)
         edges_iterator = itertools.combinations(all_edges, 3 - number_of_generator_leaves)
 
         # For each possible combination, create trinet and save it to trinets_gen_sides list
-        trinet_info_list = NetworkInfoList(network_size=3)
+        trinet_info_list = NetworkSet(network_size=3)
         for edges in edges_iterator:
             extra_leaf_dict = {}
             # Add extra leaves to base net and save together with underlying generator (self) and added edges
@@ -76,12 +76,12 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
 
         # --------- Binets -----------
         # Create iterator of possible combinations of leaves to add
-        all_edges = base_net.internal_edges
+        all_edges = base_net.internal_arcs
         number_of_generator_leaves = len(base_net.leaf_numbers)
         edges_iterator = itertools.combinations(all_edges, 2 - number_of_generator_leaves)
 
         # For each possible combination, create binet and save it to trinets_gen_sides list
-        binet_info_list = NetworkInfoList(network_size=3)
+        binet_info_list = NetworkSet(network_size=3)
         for edges in edges_iterator:
             extra_leaf_dict = {}
             # Add extra leaves to base net and save together with underlying generator (self) and added edges
@@ -100,6 +100,76 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
                                                      'symmetrical_nodes': self.symmetrical_nodes})
             binet_info_list.append(binet_info)
         return binet_info_list
+
+    @property
+    def sides(self):
+        return self.edge_sides + self.reticulation_sides
+
+    @property
+    def edge_sides(self):
+        return self.internal_arcs
+
+    @property
+    def reticulation_sides(self):
+        reticulation_sides = []
+        reticulations = self.reticulations
+        for reticulation in reticulations:
+            reticulation_child = self.nodes_below_nodes({reticulation}, max_depth=1).difference({reticulation}).pop()
+            if self.is_leaf_node(reticulation_child):
+                reticulation_sides.append(reticulation)
+        return reticulation_sides
+
+    @property
+    def sets_of_symmetric_edge_sides(self):
+        # TODO: make general
+        symmetric_sides_sets_per_generator = {
+            '1' : {
+                ('0', '1'): [('0', '1'), ('0', '1')]
+            },
+            '2a': {
+                ('0', '1'): [('0', '1')],
+                ('0', '2'): [('0', '2')],
+                ('1', '2'): [('1', '2')],
+                ('1', '3'): [('1', '3')],
+                ('2', '3'): [('2', '3')]
+            },
+            '2b': {
+                ('0', '1'): [('0', '1')],
+                ('0', '2'): [('0', '2')],
+                ('1', '3'): [('1', '3')],
+                ('1', '4'): [('1', '4')],
+                ('3', '2'): [('3', '2')],
+                ('3', '4'): [('3', '4')]
+            },
+            '2c': {
+                ('0', '1'): [('0', '1'), ('0', '2')],
+                ('1', '3'): [('1', '3'), ('2', '3')],
+                ('1', '4'): [('1', '4'), ('2', '4')]
+            },
+            '2d': {
+                ('0', '1'): [('0', '1')],
+                ('0', '2'): [('0', '2')],
+                ('1', '3'): [('1', '3'), ('1', '3')],
+                ('3', '2'): [('3', '2')]
+            }
+        }
+        return symmetric_sides_sets_per_generator[self.name]
+
+    @property
+    def sets_of_symmetric_reticulation_sides(self):
+        return {key: [key] for key in self.reticulation_sides}
+
+    @property
+    def sets_of_symmetric_sides(self):
+        return {**self.sets_of_symmetric_edge_sides, **self.sets_of_symmetric_reticulation_sides}
+
+    @property
+    def crucial_sets_of_symmetric_sides(self):
+        result = []
+        for key, sides in self.sets_of_symmetric_sides:
+            if len(sides) > 1 and sides[0] == sides[1]:
+                result.append(key)
+        return result
 
     def __copy__(self):
         cls = self.__class__

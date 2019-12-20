@@ -134,7 +134,6 @@ if __name__ == '__main__':
     # print(network.equal_structure(network_result))
 
     movable_arcs = network.movable_arcs
-    print(movable_arcs)
     network.tail_move(('16', 'f'),  movable_arcs[1])
     network.visualize()
 

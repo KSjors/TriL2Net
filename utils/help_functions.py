@@ -2,6 +2,7 @@ import logging
 import itertools
 import operator as op
 from functools import reduce
+import collections
 import copy
 import time
 import random
@@ -32,7 +33,7 @@ def all_combinations(any_list, min_len, max_len, direction=1):
 
 
 def leaf_name_iterator(min_len, max_len, char_type='alph'):
-    assert char_type in ('alph', 'ALPH', 'uid')
+    assert char_type in ('alph', 'ALPH', 'uid'), "Unknown char type"
     alphabet = ""
     if char_type == 'alph':
         alphabet = list('abcdefghijklmnopqrstuvwxyz')
@@ -250,3 +251,18 @@ def original_node_numbers(node_numbers):
         result.append(original_node_number(node_number, node_numbers[:index]))
     return result
 
+
+def power_set(iterable):
+    s = list(iterable)
+    return itertools.chain.from_iterable(itertools.combinations(s, r) for r in range(len(s)+1))
+
+
+def flatten_dictionary(d, parent_key='', sep=' '):
+    items = []
+    for k, v in d.items():
+        new_key = parent_key + sep + k if parent_key else k
+        if isinstance(v, collections.MutableMapping):
+            items.extend(flatten_dictionary(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)

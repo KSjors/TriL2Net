@@ -2,6 +2,7 @@ import logging
 from datastructures.rooted_level_k_network import RootedLevelKNetwork, NetworkSet, NetworkInfo
 from datastructures.solver import Solver
 from utils.help_functions import *
+import pandas as pd
 import typing
 import datetime as dt
 import time
@@ -13,6 +14,9 @@ from utils.help_functions import coalesce
 import collections
 import functools
 import operator
+import pprint
+
+pp = pprint.PrettyPrinter(indent=4)
 
 """
                 Data:
@@ -84,6 +88,13 @@ Process:
 
 class NetworkGenerator:
     def __init__(self, n_range, r_range, t_range):
+        # Set up logging
+        self.uid = guid()
+        self.logger_name = f"network generator.{self.uid}"
+        self.logger = logging.getLogger(self.logger_name)
+        self.logger.debug("Creating new network generator")
+
+        # parameters
         self.n = n_range
         self.r = r_range
         self.t = t_range
@@ -91,6 +102,7 @@ class NetworkGenerator:
     def iterator(self):
         param_iterator = itertools.product(self.n, self.r, self.t)
         for parameters in param_iterator:
+            self.logger.info("Generating next network")
             n, r, t = parameters
             network = RootedLevelKNetwork.random(n, r, level=2)
             if t > 0:
@@ -103,6 +115,12 @@ class NetworkGenerator:
 
 class TrinetSetGenerator:
     def __init__(self, t, u, d, all_trinet_list):
+        # Set up logging
+        self.uid = guid()
+        self.logger_name = f"trinet set generator.{self.uid}"
+        self.logger = logging.getLogger(self.logger_name)
+        self.logger.debug("Creating new trinet set generator")
+
         # save parameters
         self.t = t
         self.u = u
@@ -114,6 +132,7 @@ class TrinetSetGenerator:
         param_iterator = itertools.product(self.t, self.u, self.d)
 
         for parameters in param_iterator:
+            self.logger.info("Generating next trinet set")
             t, u, d = parameters
             distorted_trinet_set = copy.deepcopy(trinet_set)
             distorted_trinet_set = NetworkSet.tail_move_distort(distorted_trinet_set, t)
@@ -131,6 +150,10 @@ class SolverGenerator:
                  , cut_arc_set_count_method, minimal_sink_set_method, leaf_locator_method, level_threshold_method, level_count_method, generator_count_method
                  , symmetric_sides_set_count_method, leaf_order_count_method, leaf_order_method):
         # Set up logging
+        self.uid = guid()
+        self.logger_name = f"solver generator.{self.uid}"
+        self.logger = logging.getLogger(self.logger_name)
+        self.logger.debug("Creating new solver generator")
 
         # Save config
         self.cut_arc_set_count_method = cut_arc_set_count_method
@@ -151,6 +174,7 @@ class SolverGenerator:
                                            , self.level_count_method, self.generator_count_method, self.symmetric_side_set_count_method,
                                            self.leaf_order_count_method, self.leaf_order_method)
         for parameters in param_iterator:
+            self.logger.info("Generating next solver")
             solver = Solver(self.all_trinet_set, problem_trinet_set, *parameters, is_main=True)
             parameters_dict = {
                 'cut_arc_set_count_method'          : parameters[0]
@@ -183,6 +207,10 @@ class ExperimentGenerator:
                  , max_processes: int = 1
                  ):
         # Set up logging
+        self.uid = guid()
+        self.logger_name = f"experiment generator.{self.uid}"
+        self.logger = logging.getLogger(self.logger_name)
+        self.logger.debug("Creating new experiment generator")
 
         # Save generators
         self.ng = ng
@@ -195,79 +223,124 @@ class ExperimentGenerator:
 
         # Description and output
         self.name = name
-        self.logger = None
 
     def iterator(self):
         t0 = time.time()
         for network_params, network in tqdm(self.ng.iterator(), total=len(self)):
+            self.logger.info("Generating next experiment")
             experiment = Experiment(self.name)
             network.visualize()
             try:
+                # Run
                 t1 = time.time()
-                experiment['input network creation'] = t1 - t0
-                experiment['input network parameters'] = network_params
-                experiment['input network'] = network.enewick()
-                input_trinet_set, t2 = NetworkSet.induced_strict_network_set(network, 3, self.max_processes, False, self.trinet_set_method), time.time()
-                experiment['input trinet set creation'] = t2 - t1
-                experiment['input trinet set'] = {network_info.network.enewick(): network_info.multiplicity for network_info in
-                                                  input_trinet_set.per_network_info()}
-                input_triplet_set, t3 = NetworkSet.induced_strict_tree_set(network, 3, 1, False), time.time()  # TODO: from trinets_set?
-                experiment['input triplet set creation'] = t3 - t2
-                experiment['input triplet set'] = {network_info.network.enewick(): network_info.multiplicity for network_info in
-                                                   input_triplet_set.per_network_info()}
-                input_cluster_set, t4 = NetworkSet.induced_cluster_set(network, 1, False), time.time()
-                experiment['input cluster set creation'] = t4 - t3
-                experiment['input cluster set'] = {network_info.network.enewick(): network_info.multiplicity for network_info in
-                                                   input_cluster_set.per_network_info()}
+                self.logger.info("Computing input trinet set")
+                input_trinet_set, t2 = NetworkSet.induced_strict_network_set(network, 3), time.time()
+                self.logger.info("Computing input triplet set")
+                input_triplet_set, t3 = NetworkSet.induced_strict_tree_set_of_network_set(input_trinet_set, 3), time.time()
+                self.logger.info("Computing input cluster set")
+                input_cluster_set, t4 = NetworkSet.induced_cluster_set(network), time.time()
+
+                # Save parameters
+                experiment['parameters']['input network'] = network_params
+
+                # Save run times
+                experiment['run times']['input network creation'] = t1 - t0
+                experiment['run times']['input trinet set creation'] = t2 - t1
+                experiment['run times']['input triplet set creation'] = t3 - t2
+                experiment['run times']['input cluster set creation'] = t4 - t3
+
+                # Save input and output
+                experiment['input output']['input network'] = network.enewick()
+                experiment['input output']['input trinet set'] = input_trinet_set.to_enewick()
+                experiment['input output']['input triplet set'] = input_triplet_set.to_enewick()
+                experiment['input output']['input cluster set'] = input_cluster_set.to_enewick()
+
+                # Save summary
+                experiment['summaries']['input network'] = network.summary()
+
+                t4 = time.time()
                 for trinet_set_params, distorted_trinet_set in self.tsg.iterator(input_trinet_set):
                     t5 = time.time()
-                    experiment['distorted trinet set creation'] = t5 - t4
-                    experiment['distortion parameters'] = trinet_set_params
-                    experiment['distorted trinet set'] = {network_info.network.enewick(): network_info.multiplicity for network_info in
-                                                          distorted_trinet_set.per_network_info()}
+
+                    # Save consistency score
+                    experiment['consistency scores']['distorted trinet set'] = distorted_trinet_set.consistency_score(input_trinet_set)
+
+                    # Save parameters
+                    experiment['parameters']['distortion'] = trinet_set_params
+
+                    # Save run time
+                    experiment['run times']['distorted trinet set creation'] = t5 - t4
+
+                    # Save input output
+                    experiment['input output']['distorted trinet set'] = distorted_trinet_set.to_enewick()
+
+                    # Save summary
+                    experiment['summaries']['distorted trinet set'] = distorted_trinet_set.summary()
                     for solver_params, solver in self.sg.iterator(distorted_trinet_set):
                         t6 = time.time()
-                        experiment['solver creation'] = t6 - t5
-                        experiment['solver parameters'] = solver_params
-                        experiment['init'] = True
+                        experiment['finished']['init'] = True
+                        experiment.save("\\temp\\")
                         output_network, solver_scores = solver.solve()
+
                         t7 = time.time()
-                        experiment['output network'] = output_network.enewick()
-                        experiment['solving'] = t7 - t6
-                        output_trinet_set, t8 = NetworkSet.induced_strict_network_set(output_network, 3, self.max_processes, False,
-                                                                                      self.trinet_set_method), time.time()
-                        experiment['output trinet set creation'] = t8 - t7
-                        experiment['output trinet set'] = {network_info.network.enewick(): network_info.multiplicity for network_info in
-                                                           output_trinet_set.per_network_info()}
-                        output_triplet_set, t9 = NetworkSet.induced_strict_tree_set(output_network, 3, 1, False), time.time()  # TODO: from trinets_set?
-                        experiment['output triplet set creation'] = t9 - t8
-                        experiment['output triplet set'] = {network_info.network.enewick(): network_info.multiplicity for network_info in
-                                                            output_triplet_set.per_network_info()}
-                        output_cluster_set, t10 = NetworkSet.induced_cluster_set(output_network, 1, False), time.time()
-                        experiment['output cluster set creation'] = t10 - t9
-                        experiment['output cluster set'] = {network_info.network.enewick(): network_info.multiplicity for network_info in
-                                                            output_cluster_set.per_network_info()}
-                        IO_tn_cs, t11 = NetworkSet.consistency_score(input_trinet_set, output_trinet_set), time.time()
-                        experiment['trinet'] = IO_tn_cs
-                        experiment['trinet consistency score computation'] = t11 - t10
-                        IO_tp_cs, t12 = NetworkSet.consistency_score(input_triplet_set, output_triplet_set), time.time()
-                        experiment['triplet'] = IO_tp_cs
-                        experiment['triplet consistency score computation'] = t12 - t11
-                        IO_ct_cs, t13 = NetworkSet.consistency_score(input_cluster_set, output_cluster_set), time.time()
-                        experiment['cluster'] = IO_ct_cs
-                        experiment['cluster consistency score computation'] = t13 - t12
+                        self.logger.info("Computing output trinet set")
+                        output_trinet_set, t8 = NetworkSet.induced_strict_network_set(output_network, 3), time.time()
+                        self.logger.info("Computing output triplet set")
+                        output_triplet_set, t9 = NetworkSet.induced_strict_tree_set_of_network_set(output_trinet_set, 3), time.time()
+                        self.logger.info("Computing output cluster set")
+                        output_cluster_set, t10 = NetworkSet.induced_cluster_set(output_network), time.time()
+                        self.logger.info("Computing trinet consistency score")
+                        IO_tn_cs, t11 = input_trinet_set.consistency_score(output_trinet_set), time.time()
+                        self.logger.info("Computing triplet consistency score")
+                        IO_tp_cs, t12 = input_triplet_set.consistency_score(output_triplet_set), time.time()
+                        self.logger.info("Computing cluster consistency score")
+                        IO_ct_cs, t13 = input_cluster_set.consistency_score(output_cluster_set), time.time()
+                        self.logger.info("Computing cut-arc set consistency score")
                         IO_cas_cs, t14 = network.cut_arc_set_consistency(output_network), time.time()
-                        experiment['cut-arc set'] = IO_cas_cs
-                        experiment['cut-arc set consistency score computation'] = t14 - t13
+                        self.logger.info("Checking if output network is equal to input network")
                         equal, t15 = network.equal_structure(output_network, equal_naming=True), time.time()
-                        experiment['equal'] = equal[0]
-                        experiment['equal computation'] = t15 - t14
-                        experiment['full'] = True
+
+                        # Save consistency scores
+                        experiment['consistency scores']['trinet'] = IO_tn_cs
+                        experiment['consistency scores']['triplet'] = IO_tp_cs
+                        experiment['consistency scores']['cluster'] = IO_ct_cs
+                        experiment['consistency scores']['cut-arc set'] = IO_cas_cs
+                        experiment['consistency scores']['network'] = equal[0]
+
+                        # Solving parameters
+                        experiment['parameters']['solver'] = solver_params
+
+                        # Save run times
+                        experiment['run times']['solver creation'] = t6 - t5
+                        experiment['run times']['solving'] = t7 - t6
+                        experiment['run times']['output trinet set creation'] = t8 - t7
+                        experiment['run times']['output triplet set creation'] = t9 - t8
+                        experiment['run times']['trinet consistency score'] = t11 - t10
+                        experiment['run times']['output cluster set creation'] = t10 - t9
+                        experiment['run times']['triplet consistency score'] = t12 - t11
+                        experiment['run times']['cluster consistency score'] = t13 - t12
+                        experiment['run times']['cut-arc set consistency score'] = t14 - t13
+                        experiment['run times']['equal'] = t15 - t14
+
+                        # Save input output
+                        experiment['input output']['output trinet set'] = output_trinet_set.to_enewick()
+                        experiment['input output']['output triplet set'] = output_triplet_set.to_enewick()
+                        experiment['input output']['output cluster set'] = output_cluster_set.to_enewick()
+                        experiment['input output']['output network'] = output_network.enewick()
+
+                        # Save summary
+                        experiment['summaries']['output network'] = output_network.summary()
+
+                        # Save finsished
+                        experiment['finished']['full'] = True
+
                         yield experiment
                     t4 = time.time()
             except Exception as e:
-                experiment.save()
-                raise e
+                self.logger.warning(f"An error occurred: {type(e)}: {str(e)}")
+                experiment['finished']['error'] = f"{type(e)}: {str(e)}"
+                experiment.save(extra_path="\\failures")
+                raise
             t0 = time.time()
 
     def run(self):
@@ -287,13 +360,24 @@ class ExperimentGenerator:
 
 class Experiment:
     def __init__(self, name, data=None):
+        # Set up logging
+        self.uid = guid()
+        self.logger_name = f"experiment.{self.uid}"
+        self.logger = logging.getLogger(self.logger_name)
+        self.logger.debug("Creating new experiment")
+
         if data is None:
             data = {
-                'finished'            : {'init': False, 'full': False, 'location': None}
+                'finished'            : {'init': False, 'full': False, 'location': None, 'error': None}
                 , 'parameters'        : {
-                    'input network parameters': None
-                    , 'distortion parameters' : None
-                    , 'solver parameters'     : None
+                    'input network': None
+                    , 'distortion' : None
+                    , 'solver'     : None
+                }
+                , 'summaries'         : {
+                    'input network'         : None
+                    , 'output network'      : None
+                    , 'distorted trinet set': None
                 }
                 , 'input output'      : {
                     'input network'         : None
@@ -302,7 +386,6 @@ class Experiment:
                     , 'input cluster set'   : None
                     , 'distorted trinet set': None
                     , 'output network'      : None
-                    , 'solver scores'       : None
                     , 'output trinet set'   : None
                     , 'output triplet set'  : None
                     , 'output cluster set'  : None
@@ -312,27 +395,29 @@ class Experiment:
                     , 'triplet'    : None
                     , 'cluster'    : None
                     , 'cut-arc set': None
-                    , 'equal'      : None
+                    , 'network'    : None
+                    , 'solver'     : 0
+                    , 'distorted trinet set': None
                 }
                 , 'run times'         : {
-                    'input network creation'                     : None
-                    , 'input trinet set creation'                : None
-                    , 'input triplet set creation'               : None
-                    , 'input cluster set creation'               : None
-                    , 'distorted trinet set creation'            : None
-                    , 'solver creation'                          : None
-                    , 'solving'                                  : None
-                    , 'output trinet set creation'               : None
-                    , 'output triplet set creation'              : None
-                    , 'output cluster set creation'              : None
-                    , 'trinet consistency score computation'     : None
-                    , 'triplet consistency score computation'    : None
-                    , 'cluster consistency score computation'    : None
-                    , 'cut-arc set consistency score computation': None
-                    , 'equal computation'                        : None
+                    'input network creation'         : None
+                    , 'input trinet set creation'    : None
+                    , 'input triplet set creation'   : None
+                    , 'input cluster set creation'   : None
+                    , 'distorted trinet set creation': None
+                    , 'solver creation'              : None
+                    , 'solving'                      : None
+                    , 'output trinet set creation'   : None
+                    , 'output triplet set creation'  : None
+                    , 'output cluster set creation'  : None
+                    , 'trinet consistency score'     : None
+                    , 'triplet consistency score'    : None
+                    , 'cluster consistency score'    : None
+                    , 'cut-arc set consistency score': None
+                    , 'equal'                        : None
                 }
             }
-        assert type(data) == dict
+        assert type(data) == dict, "Data is of wrong type"
         self.data = data
         self.name = name
 
@@ -343,57 +428,60 @@ class Experiment:
         return cls(name, data)
 
     def __setitem__(self, key, value):
-        for other_key, values in self.data.items():
-            other_key_keys = list(values.keys())
-            if other_key == key:
-                self.data[other_key] = value
-                return
-            elif key in other_key_keys:
-                self.data[other_key][key] = value
-                return
-        raise KeyError
+        self.data[key] = value
 
     def __getitem__(self, item):
-        for key, values in self.data.items():
-            if key == item:
-                return self.data[key]
-            elif item in values.keys():
-                return self.data[key][item]
-        raise KeyError
+        return self.data[item]
 
     @staticmethod
     def convert(o):
         if isinstance(o, np.int64): return int(o)
         if isinstance(o, np.int32): return int(o)
-        raise TypeError
+        raise TypeError("Can not convert")
 
-    def save(self):
+    def save(self, extra_path=""):
+        # if extra_path != '':
+        #     raise NotImplementedError
         dir_path = os.path.dirname(os.path.realpath(__file__))
         t = dt.datetime.today().strftime('%Y-%m-%d %H%M%S-%f')
 
-        os.makedirs(os.path.dirname(f"{dir_path}\\{self.name}\\"), exist_ok=True)
-        self['location'] = f"{dir_path}\\{self.name}\\{t}.txt"
-        with open(f"{dir_path}\\{self.name}\\{t}.txt", "w") as f:
+        os.makedirs(os.path.dirname(f"{dir_path}{extra_path}\\{self.name}\\"), exist_ok=True)
+        self['location'] = f"{dir_path}{extra_path}\\{self.name}\\{t}.txt"
+        self.logger.info(f"Saving to {dir_path}{extra_path}\\{self.name}\\{t}.txt")
+        with open(f"{dir_path}{extra_path}\\{self.name}\\{t}.txt", "w") as f:
             json.dump(obj=self.data, default=self.convert, fp=f)
+
+    def to_df(self):
+        data = flatten_dictionary({key: self.data[key] for key in self.data.keys() if key != 'input output'})
+        keys = list(data.keys())
+        df = pd.DataFrame(columns=keys)
+        df.loc[0] = [data[key] for key in keys]
+        return df
 
     @property
     def input_network(self):
-        return RootedLevelKNetwork.from_enewick(self['input network'])
+        return RootedLevelKNetwork.from_enewick(self['input output']['input network'])
 
     @property
     def output_network(self):
-        return RootedLevelKNetwork.from_enewick(self['output network'])
+        return RootedLevelKNetwork.from_enewick(self['input output']['output network'])
+
+    def recreate_network_set(self, category):
+        self.logger.info(f"Loading {category}")
+        return NetworkSet.from_enewick(self['input output'][category])
 
     def visualize_input_output(self):
         self.input_network.visualize()
+        time.sleep(1)
         self.output_network.visualize()
 
-    def plot_consistency_scores(self):
+    def plot_consistency_scores(self, show=True):
         data = self['consistency scores']
         plt.bar(x=data.keys(), height=data.values())
         plt.ylim([0, 1])
         plt.xticks(rotation=90)
-        plt.show()
+        if show:
+            plt.show()
 
     def plot_run_times(self):
         data = self['run times']
@@ -403,7 +491,7 @@ class Experiment:
         plt.show()
 
     def plot_solver_scores(self):
-        data = self['solver scores']
+        data = self['consistency scores']['solver']
         plt.bar(x=data.keys(), height=data.values())
         plt.ylim([0, 1])
         plt.xticks(rotation=90)
@@ -418,58 +506,84 @@ class Experiment:
         return self['solver creation'] + self['solving']
 
     def rerun(self, all_trinet_set, trinet_set_method, max_processes):
+        self.logger.info("Running experiment ...")
         try:
-            network = RootedLevelKNetwork.from_enewick(self['input network'])
+            self.logger.info("Loading input network")
+            network = RootedLevelKNetwork.from_enewick(self['input output']['input network'])
             network.visualize()
+            input_trinet_set = self.recreate_network_set('input trinet set')
+            input_triplet_set = self.recreate_network_set('input triplet set')
+            input_cluster_set = self.recreate_network_set('input cluster set')
+            distorted_trinet_set = self.recreate_network_set('distorted trinet set')
 
-            input_trinet_set = NetworkSet(3, network_info_list=[NetworkInfo(RootedLevelKNetwork.from_enewick(enewick), multiplicity) for enewick, multiplicity
-                                                                in self['input trinet set'].items()])
-            input_triplet_set = NetworkSet(3, network_info_list=[NetworkInfo(RootedLevelKNetwork.from_enewick(enewick), multiplicity) for enewick, multiplicity
-                                                                 in self['input triplet set'].items()])
-            input_cluster_set = NetworkSet(network.number_of_leaves,
-                                           network_info_list=[NetworkInfo(RootedLevelKNetwork.from_enewick(enewick), multiplicity) for enewick, multiplicity
-                                                              in self['input cluster set'].items()])
-            distorted_trinet_set = NetworkSet(3, network_info_list=[NetworkInfo(network=RootedLevelKNetwork.from_enewick(enewick, multiplicity)) for
-                                                                    enewick, multiplicity in self['distorted trinet set'].items()])
             t6 = time.time()
-            solver_params = self['solver parameters']
+            self.logger.info("Creating solver")
+            solver_params = self['parameters']['solver']
             solver = Solver(all_trinet_set, distorted_trinet_set, **solver_params, is_main=True)
             output_network, solver_scores = solver.solve()
             t7 = time.time()
-            self['output network'] = output_network.enewick()
-            self['solving'] = t7 - t6
-            output_trinet_set, t8 = NetworkSet.induced_strict_network_set(output_network, 3, max_processes, False, trinet_set_method), time.time()
-            self['output trinet set creation'] = t8 - t7
-            self['output trinet set'] = {network_info.network.enewick(): network_info.multiplicity for network_info in
-                                         output_trinet_set.per_network_info()}
-            output_triplet_set, t9 = NetworkSet.induced_strict_tree_set(output_network, 3, 1, False), time.time()  # TODO: from trinets_set?
-            self['output triplet set creation'] = t9 - t8
-            self['output triplet set'] = {network_info.network.enewick(): network_info.multiplicity for network_info in
-                                          output_triplet_set.per_network_info()}
-            output_cluster_set, t10 = NetworkSet.induced_cluster_set(output_network, 1, False), time.time()
-            self['output cluster set creation'] = t10 - t9
-            self['output cluster set'] = {network_info.network.enewick(): network_info.multiplicity for network_info in
-                                          output_cluster_set.per_network_info()}
-            IO_tn_cs, t11 = NetworkSet.consistency_score(input_trinet_set, output_trinet_set), time.time()
-            self['trinet'] = IO_tn_cs
-            self['trinet consistency score computation'] = t11 - t10
-            IO_tp_cs, t12 = NetworkSet.consistency_score(input_triplet_set, output_triplet_set), time.time()
-            self['trinet'] = IO_tp_cs
-            self['trinet consistency score computation'] = t12 - t11
-            IO_ct_cs, t13 = NetworkSet.consistency_score(input_cluster_set, output_cluster_set), time.time()
-            self['trinet'] = IO_ct_cs
-            self['trinet consistency score computation'] = t13 - t12
+            output_trinet_set, t8 = NetworkSet.induced_strict_network_set(output_network, 3), time.time()
+            self.logger.info("Computing output triplet set")
+            output_triplet_set, t9 = NetworkSet.induced_strict_tree_set_of_network_set(output_trinet_set, 3), time.time()
+            self.logger.info("Computing output cluster set")
+            output_cluster_set, t10 = NetworkSet.induced_cluster_set(output_network), time.time()
+            self.logger.info("Computing trinet consistency")
+            IO_tn_cs, t11 = input_trinet_set.consistency_score(input_trinet_set), time.time()
+            self.logger.info("Computing triplet consistency")
+            IO_tp_cs, t12 = input_triplet_set.consistency_score(output_triplet_set), time.time()
+            self.logger.info("Computing cluster consistency")
+            IO_ct_cs, t13 = input_cluster_set.consistency_score(output_cluster_set), time.time()
+            self.logger.info("Computing cut-arc set consistency")
             IO_cas_cs, t14 = network.cut_arc_set_consistency(output_network), time.time()
-            self['trinet'] = IO_cas_cs
-            self['trinet consistency score computation'] = t14 - t13
+            self.logger.info("Checking if output network is equal to input network")
+            equal, t15 = network.equal_structure(output_network, equal_naming=True), time.time()
+
+            # Save consistencies
+            self['consistency scores']['trinet'] = IO_tn_cs
+            self['consistency scores']['triplet'] = IO_tp_cs
+            self['consistency scores']['cluster'] = IO_ct_cs
+            self['consistency scores']['cut-arc set'] = IO_cas_cs
+            self['consistency scores']['network'] = equal[0]
+
+            # Save run times
+            self['run times']['solving'] = t7 - t6
+            self['run times']['output trinet set creation'] = t8 - t7
+            self['run times']['output triplet set creation'] = t9 - t8
+            self['run times']['output cluster set creation'] = t10 - t9
+            self['run times']['trinet consistency score'] = t11 - t10
+            self['run times']['triplet consistency score'] = t12 - t11
+            self['run times']['cluster consistency score'] = t13 - t12
+            self['run times']['cut-arc set consistency score'] = t14 - t13
+            self['run times']['equal'] = t15 - t14
+
+            # Save input output
+            self['input output']['output network'] = output_network.enewick()
+            self['input output']['output trinet set'] = output_trinet_set.to_enewick()
+            self['input output']['output triplet set'] = output_triplet_set.to_enewick()
+            self['input output']['output cluster set'] = output_cluster_set.to_enewick()
+
+            # Save summaries
+            self['summaries']['output network'] = output_network.summary()
+
+            # Save finished
+            self['finished']['full'] = True
         except Exception as e:
-            self.save()
+            self.logger.warning(f"An error occurred: {type(e)}: {str(e)}")
+            self['finished']['error'] = f"{type(e)}: {str(e)}"
+            self.save(extra_path="\\failures")
             raise e
         self.save()
 
 
 class ExperimentSet:
     def __init__(self, name, experiments=None):
+        # Set up logging
+        self.uid = guid()
+        self.logger_name = f"experiment.{self.uid}"
+        self.logger = logging.getLogger(self.logger_name)
+        self.logger.debug("Creating new experiment set")
+
+        # save config
         self.name = name
         self.experiments = coalesce(experiments, [])
 
@@ -481,6 +595,18 @@ class ExperimentSet:
                 result.experiments.append(Experiment.load(f"{folder_path}\\{filename}", name))
         return result
 
+    @classmethod
+    def filter(cls, experiment_set, category, value, direction: bool = True):
+        result = cls(experiment_set.name)
+        for experiment in experiment_set.experiments:
+            if (experiment[category] == value) is direction:
+                result.append(experiment)
+        return result
+
+    def to_df(self) -> pd.DataFrame:
+        df = pd.concat([e.to_df() for e in self.experiments])
+        return df
+
     def plot_average_run_time(self):
         data = dict(functools.reduce(operator.add, map(collections.Counter, [exp['run times'] for exp in self.experiments])))
         data = {key: value / len(self.experiments) for key, value in data.items()}
@@ -490,7 +616,7 @@ class ExperimentSet:
         plt.show()
 
     def plot_finished(self):
-        data = {index: (experiment['init'] + experiment['full']) / 2 for index, experiment in enumerate(self.experiments)}
+        data = {index: (experiment['finished']['init'] + experiment['finished']['full']) / 2 for index, experiment in enumerate(self.experiments)}
         plt.bar(x=data.keys(), height=data.values())
         plt.xticks(rotation=90)
         plt.ylim([0, 1])
@@ -507,17 +633,14 @@ class ExperimentSet:
         plt.show()
 
     def plot_consistency_scores(self):
-        consistency_types = ['trinet', 'triplet', 'cluster', 'cut-arc set']
-        x = range(len(self.experiments))
-        for i, consistency_type in enumerate(consistency_types):
-            plt.subplot(len(consistency_types), 1, i + 1)
-            data = [exp[consistency_type] for exp in self.experiments]
-            plt.bar(x=x, height=data)
-            plt.ylim([0, 1])
-            plt.ylabel(f'{consistency_type}')
+        l = len(self.experiments)
+        for i, exp in enumerate(self.experiments):
+            plt.subplot(1, l, i+1)
+            exp.plot_consistency_scores(show=False)
         plt.show()
 
     def save(self):
+        self.logger.info("Saving experiments ... ")
         for experiment in self.experiments:
             experiment.save()
 
@@ -528,5 +651,6 @@ class ExperimentSet:
         return self.experiments[item]
 
     def rerun(self, all_trinet_set, trinet_set_method, max_processes):
+        self.logger.info("Running experiments ...")
         for exp in self.experiments:
             exp.rerun(all_trinet_set, trinet_set_method, max_processes)

@@ -4,7 +4,7 @@ Created on Wed Mar 13 14:48:29 2019
 
 @author: Sjors
 """
-from datastructures.rooted_level_k_generator import *
+from datastructures.rooted_level_k_network import RootedLevelKGenerator
 import numpy as np
 from bidict import bidict
 import time

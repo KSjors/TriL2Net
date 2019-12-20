@@ -33,8 +33,8 @@ def regenerate_standard_networks() -> None:
     }
 
     # Get biconnected binets and trinets for each generator
-    biconnected_trinet_list = NetworkSet(network_size=3, equal_naming=False)
-    biconnected_binet_list = NetworkSet(network_size=3, equal_naming=False)
+    biconnected_trinet_list = NetworkSet(equal_naming=False)
+    biconnected_binet_list = NetworkSet(equal_naming=False)
     for level, generator_list in all_generators.items():
         for generator in generator_list:
             generator_trinet_info_list = generator.build_trinets()
@@ -46,7 +46,7 @@ def regenerate_standard_networks() -> None:
     biconnected_binet_list.set_multiplicities_to_one()
 
     # From binets create trinets with two biconnected components
-    two_component_trinet_list = NetworkSet(network_size=3)
+    two_component_trinet_list = NetworkSet()
     two_binet_infos_iterator = itertools.combinations(biconnected_binet_list, 2)
     for binet_infos in two_binet_infos_iterator:
         previous_two_component_trinet = None

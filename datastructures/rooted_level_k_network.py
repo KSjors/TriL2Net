@@ -2095,13 +2095,13 @@ class NetworkSet:
                 if progress_bar:
                     for new_network_info_list in tqdm(
                             pool.imap_unordered(
-                                cls._displayed_trees_recursive_helper, zip(network_info_list, itertools.repeat(reticulation_names[0]))),
+                                cls._displayed_trees_recursive_helper, zip(network_info_list.per_network_info(), itertools.repeat(reticulation_names[0]))),
                             desc=f"Computing displayed trees using {max_processes} processes"):
                         result.extend(cls._displayed_trees_recursive(new_network_info_list, reticulation_names=reticulation_names[1:]))
                         index_2 += 1
                 else:
                     for new_network_info_list in pool.imap_unordered(cls._displayed_trees_recursive_helper,
-                                                                     zip(network_info_list, itertools.repeat(reticulation_names[0]))):
+                                                                     zip(network_info_list.per_network_info(), itertools.repeat(reticulation_names[0]))):
                         result.extend(cls._displayed_trees_recursive(new_network_info_list, reticulation_names=reticulation_names[1:]))
                         index_2 += 1
                 pool.close()
@@ -2734,6 +2734,7 @@ class Omega:
     def strongly_connected_components_to_minimal_sink_sets(strongly_connected_components, sub_graph):
         trivial_sink_sets = []
         minimal_sink_sets = []
+        # print(f"SCC: {strongly_connected_components}")
         for strongly_connected_component in strongly_connected_components:
             for node in strongly_connected_component:
                 if node in sub_graph.keys():
@@ -2746,9 +2747,13 @@ class Omega:
                 else:
                     minimal_sink_sets.append(strongly_connected_component)
 
+        # print(f"MSS: {minimal_sink_sets}")
+        # print(f"TSS: {trivial_sink_sets}")
+
         # Extend trivial sink-sets to minimal sink-sets
-        combinations = [[]]
+        minimal_extended_trivial_sink_sets = []
         for tss in trivial_sink_sets:
+            # print(f"Extending TSS: {tss}")
             extended_trivial_sink_sets = []
             node = tss[0]
             parents_node = {from_node for from_node, to_nodes in sub_graph.items() if node in to_nodes}
@@ -2764,32 +2769,33 @@ class Omega:
                             extended_ss.extend(out_nodes)
                             out_nodes = set(itertools.chain.from_iterable([sub_graph[n] for n in extended_ss if n in sub_graph.keys()])).difference(
                                 extended_ss)
+
+                        # print(f"Extended TSS to: {extended_ss}")
                         # Check if sink set intersects any of the minimal sink-sets
                         if not set(extended_ss).intersection(itertools.chain.from_iterable(minimal_sink_sets)):
                             extended_trivial_sink_sets.append(extended_ss)
-                        break
+                            # print("Succesfull extension")
+            # print(f"ETSS: {extended_trivial_sink_sets}")
+
             # Take only those etss that are not superset of others --> these are minimal sink-sets
             extended_trivial_sink_sets = sorted(extended_trivial_sink_sets, key=len, reverse=True)
-            minimal_extended_trivial_sink_sets = []
+
             for index, etss in enumerate(extended_trivial_sink_sets):
                 for etss_other in extended_trivial_sink_sets[index + 1:]:
                     if set(etss).issuperset(etss_other):
+                        # print(f"Extension {etss} is superset of {etss_other}")
                         break
                 else:
                     minimal_extended_trivial_sink_sets.append(etss)
+            # print(f"METSS: {minimal_extended_trivial_sink_sets}")
 
-            # Create combinations of these new found metss with the previously found
-            new_combinations = []
-            for combination in combinations:
-                for metss in minimal_extended_trivial_sink_sets:
-                    if len(set(metss).intersection(itertools.chain.from_iterable(combination))) == 0:
-                        new_combinations.append(combination + [metss])
-            combinations = new_combinations
 
-        combinations = [metss_combo + minimal_sink_sets for metss_combo in combinations]
-        if len(combinations) == 0:
-            combinations = [minimal_sink_sets]
-        return combinations
+        chosen_combination = []
+        for metss in sorted(minimal_extended_trivial_sink_sets, key=len):
+            if len(set(metss).intersection(itertools.chain.from_iterable(chosen_combination))) == 0:
+                chosen_combination.append(metss)
+
+        return chosen_combination + minimal_sink_sets
 
     def visualize(self, file_path: str = None, edge_labels=True, threshold: int = 0):
         dot = Digraph()

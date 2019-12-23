@@ -85,23 +85,24 @@ class Solver:
             self.logger.info("Finished shrinking, as there is only one leaf leftover")
             return False
         elif len(leaves_leftover) == 2:
-            minimal_sink_sets_sets = [[leaves_leftover]]
+            minimal_sink_sets = [leaves_leftover]
             self.logger.info(f"Inconsistency: Score of minimal sink-set is 100%")
         else:
             auxiliary_graph = Omega.from_network_info_list(self.trinet_set)
-            minimal_sink_sets_sets, mss_score = auxiliary_graph.minimal_sink_sets(self.minimal_sink_set_method)
+            minimal_sink_sets, mss_score = auxiliary_graph.minimal_sink_sets(self.minimal_sink_set_method)
             self.logger.info(f"Inconsistency: Score of minimal sink-set is {mss_score}%")
-        self.logger.info(f"Minimal sink-sets are \n {pp.pformat(minimal_sink_sets_sets)}")
+        self.logger.info(f"Minimal sink-sets are \n {pp.pformat(minimal_sink_sets)}")
         # TODO --> do all options in mimimal_sink_sets_sets (using steps?)
-        if minimal_sink_sets_sets == [[]]:
+        if minimal_sink_sets == []:
             raise NotImplementedError("No minimal sink-sets found")
-        for minimal_sink_set in sorted(minimal_sink_sets_sets[0], key=lambda x: len(x)):
+        for minimal_sink_set in sorted(minimal_sink_sets, key=lambda x: len(x)):
             if minimal_sink_set == []:
                 raise ValueError("Empty minimal sink-set error")
             self.shrink_mss(minimal_sink_set)
         return True
 
     def next_expansion(self):
+
         self.logger.info("Performing the next expansion.")
         steps = self.expand_mss(copy.deepcopy(self.steps[-1]['network']))
         for step in steps:

@@ -15,6 +15,7 @@ import collections
 import functools
 import operator
 import pprint
+from scipy import optimize
 
 pp = pprint.PrettyPrinter(indent=4)
 
@@ -107,7 +108,7 @@ class NetworkGenerator:
             network = RootedLevelKNetwork.random(n, r, level=2)
             if t > 0:
                 network.terminate_percentage_leaves(t)
-            yield parameters, network
+            yield {'n': n, 'recombination': r, 'termination': t}, network
 
     def __len__(self):
         return len(self.n) * len(self.r) * len(self.t)
@@ -138,7 +139,7 @@ class TrinetSetGenerator:
             distorted_trinet_set = NetworkSet.tail_move_distort(distorted_trinet_set, t)
             distorted_trinet_set = NetworkSet.uniform_distort(distorted_trinet_set, u, self.all_trinet_list)
             distorted_trinet_set = NetworkSet.deletion_distort(distorted_trinet_set, d)
-            yield parameters, distorted_trinet_set
+            yield {'tail move': t, 'uniform': u, 'deletion': d}, distorted_trinet_set
 
     def __len__(self):
         return len(self.t) * len(self.u) * len(self.d)
@@ -234,11 +235,11 @@ class ExperimentGenerator:
                 # Run
                 t1 = time.time()
                 self.logger.info("Computing input trinet set")
-                input_trinet_set, t2 = NetworkSet.induced_strict_network_set(network, 3), time.time()
+                input_trinet_set, t2 = NetworkSet.induced_strict_network_set(network, 3, max_processes=8, progress_bar=False), time.time()
                 self.logger.info("Computing input triplet set")
-                input_triplet_set, t3 = NetworkSet.induced_strict_tree_set_of_network_set(input_trinet_set, 3), time.time()
+                input_triplet_set, t3 = NetworkSet.induced_strict_tree_set_of_network_set(input_trinet_set, 3, max_processes=8), time.time()
                 self.logger.info("Computing input cluster set")
-                input_cluster_set, t4 = NetworkSet.induced_cluster_set(network), time.time()
+                input_cluster_set, t4 = NetworkSet.induced_cluster_set(network, max_processes=8), time.time()
 
                 # Save parameters
                 experiment['parameters']['input network'] = network_params
@@ -284,11 +285,11 @@ class ExperimentGenerator:
 
                         t7 = time.time()
                         self.logger.info("Computing output trinet set")
-                        output_trinet_set, t8 = NetworkSet.induced_strict_network_set(output_network, 3), time.time()
+                        output_trinet_set, t8 = NetworkSet.induced_strict_network_set(output_network, 3, max_processes=8), time.time()
                         self.logger.info("Computing output triplet set")
-                        output_triplet_set, t9 = NetworkSet.induced_strict_tree_set_of_network_set(output_trinet_set, 3), time.time()
+                        output_triplet_set, t9 = NetworkSet.induced_strict_tree_set_of_network_set(output_trinet_set, 3, max_processes=8), time.time()
                         self.logger.info("Computing output cluster set")
-                        output_cluster_set, t10 = NetworkSet.induced_cluster_set(output_network), time.time()
+                        output_cluster_set, t10 = NetworkSet.induced_cluster_set(output_network, max_processes=8), time.time()
                         self.logger.info("Computing trinet consistency score")
                         IO_tn_cs, t11 = input_trinet_set.consistency_score(output_trinet_set), time.time()
                         self.logger.info("Computing triplet consistency score")
@@ -391,12 +392,12 @@ class Experiment:
                     , 'output cluster set'  : None
                 }
                 , 'consistency scores': {
-                    'trinet'       : None
-                    , 'triplet'    : None
-                    , 'cluster'    : None
-                    , 'cut-arc set': None
-                    , 'network'    : None
-                    , 'solver'     : 0
+                    'trinet'                : None
+                    , 'triplet'             : None
+                    , 'cluster'             : None
+                    , 'cut-arc set'         : None
+                    , 'network'             : None
+                    , 'solver'              : 0
                     , 'distorted trinet set': None
                 }
                 , 'run times'         : {
@@ -477,6 +478,7 @@ class Experiment:
 
     def plot_consistency_scores(self, show=True):
         data = self['consistency scores']
+        print(data)
         plt.bar(x=data.keys(), height=data.values())
         plt.ylim([0, 1])
         plt.xticks(rotation=90)
@@ -522,11 +524,11 @@ class Experiment:
             solver = Solver(all_trinet_set, distorted_trinet_set, **solver_params, is_main=True)
             output_network, solver_scores = solver.solve()
             t7 = time.time()
-            output_trinet_set, t8 = NetworkSet.induced_strict_network_set(output_network, 3), time.time()
+            output_trinet_set, t8 = NetworkSet.induced_strict_network_set(output_network, 3, max_processes=8), time.time()
             self.logger.info("Computing output triplet set")
-            output_triplet_set, t9 = NetworkSet.induced_strict_tree_set_of_network_set(output_trinet_set, 3), time.time()
+            output_triplet_set, t9 = NetworkSet.induced_strict_tree_set_of_network_set(output_trinet_set, 3, max_processes=8), time.time()
             self.logger.info("Computing output cluster set")
-            output_cluster_set, t10 = NetworkSet.induced_cluster_set(output_network), time.time()
+            output_cluster_set, t10 = NetworkSet.induced_cluster_set(output_network, max_processes=8), time.time()
             self.logger.info("Computing trinet consistency")
             IO_tn_cs, t11 = input_trinet_set.consistency_score(input_trinet_set), time.time()
             self.logger.info("Computing triplet consistency")
@@ -635,9 +637,37 @@ class ExperimentSet:
     def plot_consistency_scores(self):
         l = len(self.experiments)
         for i, exp in enumerate(self.experiments):
-            plt.subplot(1, l, i+1)
+            plt.subplot(1, l, i + 1)
             exp.plot_consistency_scores(show=False)
         plt.show()
+
+    def plot_(self, x_axis, y_axis, fit=False):
+        data = self.to_df()
+        x, y = data[x_axis].values, data[y_axis].values
+        mi, ma, = 0, int(max(x)) + 50
+
+        # Plotting
+        plt.plot(x, y, 'o')
+
+        if fit:
+            def func(n, a, b, c, d, e, f, g):
+                ps = [a, b, c, d, e, f, g]
+                return sum(p * n ** (i + 1) for i, p in enumerate(ps))
+
+            popt, pcov = optimize.curve_fit(func, xdata=x, ydata=y, bounds=(0, np.inf))
+
+            x_data = np.arange(mi, ma, 0.1)
+            y_data = [func(xi, *popt) for xi in x_data]
+            plt.plot(x_data, y_data)  # label='fit: a=%5.3f, b=%5.3f, c=%5.3f' % tuple(popt))
+
+        plt.xlim([mi, ma])
+        plt.xticks(range(mi, ma, 5))
+        # plt.ylabel('time (s)')
+        # plt.xlabel('number of nodes')
+        plt.show()
+
+    def plot_solving_times(self):
+        self.plot_('summaries input network n', 'run times solving')
 
     def save(self):
         self.logger.info("Saving experiments ... ")

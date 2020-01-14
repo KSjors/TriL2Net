@@ -25,6 +25,8 @@ import collections
 import multiprocessing
 import typing
 from config import settings
+from data.trinet_format import TRINET_TYPE_ENEWICK
+import operator
 
 pp = pprint.PrettyPrinter(indent=4)
 
@@ -100,9 +102,48 @@ class RootedLevelKNetwork:
         return cp
 
     @classmethod
+    def from_rooted_level_k_generator(cls, generator, ):
+        adj_matrix = copy.deepcopy(generator.adj_matrix)
+        node_name_map = copy.deepcopy(generator.node_name_map)
+        leaf_names = copy.deepcopy(generator.leaf_names)
+        result = cls(adj_matrix, node_name_map, leaf_names=leaf_names)
+        return result
+
+    @classmethod
+    def subnet_from_rooted_level_k_generator(cls, generator, leaves_per_internal_arc):
+        adj_matrix = copy.deepcopy(generator.adj_matrix)
+        node_name_map = copy.deepcopy(generator.node_name_map)
+        leaf_names = copy.deepcopy(generator.leaf_names)
+        result = cls(adj_matrix, node_name_map, leaf_names=leaf_names)
+        result.standardize_node_names()
+        for arc in result._internal_arcs:
+            from_node, to_node = arc
+            for _ in range(leaves_per_internal_arc):
+                from_node, _ = result._add_leaf_to_arc((from_node, to_node))
+
+        for leaf in result._reticulation_leaves:
+            result._split_leaf(leaf)
+        result.standardize_node_names()
+        return result
+
+    @classmethod
     def from_enewick(cls, string, check_valid=True):
         adjacency_dict, leaf_names = enewick(string)
         result = cls.from_connections_dict(adjacency_dict, leaf_names=list(leaf_names), check_valid=check_valid)
+        return result
+
+    @classmethod
+    def from_trinet_format(cls, x):
+        x = x[3:-1]
+        trinet_type = x[-2:]
+        x = x[:-5]
+        taxa = x.split(', ')
+
+        enewick = TRINET_TYPE_ENEWICK[trinet_type]
+        result = cls.from_enewick(enewick)
+        for old_name, new_name in zip('ABC'[:len(taxa)], taxa):
+            result.rename_node(old_name, new_name)
+
         return result
 
     @classmethod
@@ -119,13 +160,6 @@ class RootedLevelKNetwork:
         new_network._terminate_leaves(leaf_numbers_to_keep=leaf_numbers)
         new_network.prune(suppress_redundant=suppress_redundant, suppress_parallel=suppress_parallel)
         return new_network
-
-    @classmethod
-    def from_generator(cls, generator, level=2, char_type='ALPH'):
-        adj_matrix = copy.deepcopy(generator.adj_matrix)
-        adj_matrix[adj_matrix < 0] = 0
-        dir_adj_matrix = adj_matrix[generator.internal_node_numbers, :]
-        return cls.from_dir_adj_matrix(dir_adj_matrix=dir_adj_matrix, level=level, check_valid=False, char_type=char_type)
 
     @classmethod
     def from_dir_adj_matrix(cls, dir_adj_matrix: np.ndarray, level=2, dimension=2, check_valid=True, char_type='alph'):
@@ -205,6 +239,21 @@ class RootedLevelKNetwork:
         network.evolve_times(number_of_leaves - 2, recombination_chance, progress_bar=False)
         network.standardize_node_names()
         return network
+
+    @classmethod
+    def from_subnets(cls, subnets, number_of_subnets, n):
+        l = list(subnets.per_network_info())
+        result = copy.deepcopy(random.sample(l, 1)[0]).network
+        for _ in range(number_of_subnets - 1):
+            subnet = random.sample(l, 1)[0].network
+            leaf_to_replace = random.sample(result.leaf_numbers, 1)[0]
+            result._replace_leaf_with_network(leaf_to_replace, subnet, replace_names=True)
+        leaves_to_many = result.number_of_leaves - n
+        assert leaves_to_many >= 0, f"Can not generate network with {n} leaves using {number_of_subnets} of these subnets"
+        leaves_to_terminate = random.sample(result.leaf_numbers, leaves_to_many)
+        result._terminate_nodes(set(leaves_to_terminate))
+        result.standardize_node_names()
+        return result
 
     def is_valid(self) -> bool:
         """Check if network is valid: has right degrees and number of roots and reticulations"""
@@ -305,6 +354,21 @@ class RootedLevelKNetwork:
         return list(np.where(np.array(self.get_in_degrees()) > 1)[0])
 
     @property
+    def reticulation_leaves(self) -> list:
+        """Retrieve node names of all reticulations."""
+        return self.get_node_names_of(self._reticulation_leaves)
+
+    @property
+    def _reticulation_leaves(self) -> list:
+        result = []
+        reticulation_nodes = self._reticulations
+        for reticulation_node in self._reticulations:
+            child_node = self._nodes_below_nodes({reticulation_node}, max_depth=1).difference({reticulation_node}).pop()
+            if self._is_leaf_node(child_node):
+                result.append(child_node)
+        return result
+
+    @property
     def biconnected_components(self) -> list:
         """Compute biconnected components."""
         return [self.get_node_names_of(biconnected_component) for biconnected_component in self._biconnected_components]
@@ -332,21 +396,13 @@ class RootedLevelKNetwork:
     def _cut_arc_sets(self) -> list:
         if self._o_cut_arc_sets is None:
             self._compute_cut_arc_sets()
-            cut_arc_matrix = self.cut_arc_matrix
-            _, to_nodes = np.where(cut_arc_matrix == 1)
-            self._o_cut_arc_sets = []
-            for to_node in to_nodes:
-                ca_set = list(self._nodes_below_nodes({to_node}))
-                self._o_cut_arc_sets.append(ca_set)
-        return [[node_number for node_number in cut_arc_set if self._is_leaf_node(node_number)] for cut_arc_set in self._o_cut_arc_sets]
-        # TODO: maybe also add all leaves as ca-set
+        return self._o_cut_arc_sets
 
     @property
     def cut_arc_matrix(self) -> np.ndarray:
         """Compute indicator matrix for arcs which are cut-arcs."""
         if self._o_cut_arc_matrix is None:
             self._compute_cut_arc_matrix()
-
         return self._o_cut_arc_matrix
 
     @property
@@ -360,14 +416,23 @@ class RootedLevelKNetwork:
         return self._o_partial_ordering
 
     @property
-    def leaf_ordering(self) -> tuple:
-        return tuple(tuple(self.get_node_names_of(leaf_ordering)) for leaf_ordering in self._leaf_ordering)
+    def leaf_order(self) -> tuple:
+        return tuple(tuple(self.get_node_names_of(leaf_ordering)) for leaf_ordering in self._leaf_order)
 
     @property
-    def _leaf_ordering(self) -> tuple:
+    def _leaf_order(self) -> tuple:
         if self._o_leaf_ordering is None:
             self._compute_leaf_ordering()
         return self._o_leaf_ordering
+
+    @property
+    def reticulationless_leaf_order(self) -> tuple:
+        return tuple(tuple(self.get_node_names_of(leaf_ordering)) for leaf_ordering in self._reticulationless_leaf_order)
+
+    @property
+    def _reticulationless_leaf_order(self) -> tuple:
+        reticulation_leaves = self._reticulation_leaves
+        return tuple((leaf for leaf in leaf_ordering if not leaf in reticulation_leaves)for leaf_ordering in self._leaf_order)
 
     @property
     def number_of_arcs(self):
@@ -445,8 +510,8 @@ class RootedLevelKNetwork:
         result = dict()
         result['cut arc sets'] = [len(ca) for ca in self._cut_arc_sets]
         result['n'] = self.number_of_leaves
-        result['biconnected components'] = {'0': [], '1': [], '2': []}
-        result['biconnected components leaves'] = {'0': [], '1': [], '2': []}
+        result['biconnected components'] = {'0': {}, '1': {}, '2': {}}
+        result['biconnected components leaves'] = {'0': {}, '1': {}, '2': {}}
         bcs = self._biconnected_components
         total_reticulations = 0
         total_reticulation_leaves = 0
@@ -456,8 +521,14 @@ class RootedLevelKNetwork:
             bc_leaves = [node for node in self._nodes_below_nodes(set(bc), max_depth=1) if self._is_leaf_node(node)]
             bc_reticulation_leaves = len([node for node in bc_leaves if self._is_reticulation_leaf(node)])
             total_reticulation_leaves += bc_reticulation_leaves
-            result['biconnected components'][str(bc_reticulations)].append(len(bc_leaves))
-            result['biconnected components leaves'][str(bc_reticulation_leaves)].append(len(bc_leaves))
+            try:
+                result['biconnected components'][str(bc_reticulations)][len(bc_leaves)] += 1
+            except KeyError:
+                result['biconnected components'][str(bc_reticulations)][len(bc_leaves)] = 1
+            try:
+                result['biconnected components leaves'][str(bc_reticulation_leaves)][len(bc_leaves)] += 1
+            except KeyError:
+                result['biconnected components'][str(bc_reticulations)][len(bc_leaves)] = 1
         result['total reticulations'] = total_reticulations
         result['total reticulation leaves'] = total_reticulation_leaves
         return result
@@ -647,7 +718,7 @@ class RootedLevelKNetwork:
 
     def _suppress_node(self, node_number: int):
         """Remove node and connect its parent to its child if they both exist."""
-        self._suppress_component([node_number])
+        return self._suppress_component([node_number])
 
     def _suppress_component(self, component: list):
         """Remove all nodes in component and connect its parent to its child if they both exist."""
@@ -662,6 +733,8 @@ class RootedLevelKNetwork:
             in_node = shifted_node_number(in_node, component)
             if not self._is_arc(in_node, out_node):
                 self._add_arc(in_node, out_node)
+                return True
+        return False
 
     # --------------------------------------------------------- ALTER NETWORK METHODS --------------------------------------------------------- #
     def terminate_leaves(self, leaf_names_to_terminate: set = None, leaf_names_to_keep: set = None):
@@ -688,15 +761,15 @@ class RootedLevelKNetwork:
         self._terminate_leaf(self.get_node_number_of(leaf_name))
         self.reset_optimization_variables()
 
-    def add_leaf_to_edge(self, edge: list, leaf_name: str = None, char_type='alph') -> (str, str):
+    def add_leaf_to_arc(self, arc: list, leaf_name: str = None, char_type='alph') -> (str, str):
         """Add node between parent and child and attach leaf with leaf_name to it."""
-        res = self.get_node_names_of(list(self._add_leaf_to_edge(self.get_node_numbers_of(edge), leaf_name, char_type)))
+        res = self.get_node_names_of(list(self._add_leaf_to_arc(self.get_node_numbers_of(arc), leaf_name, char_type)))
         self.reset_optimization_variables()
         return res
 
-    def _add_leaf_to_edge(self, edge, leaf_name: str = None, char_type='alph') -> (int, int):
-        parent = edge[0]
-        child = edge[1]
+    def _add_leaf_to_arc(self, arc, leaf_name: str = None, char_type='alph') -> (int, int):
+        parent = arc[0]
+        child = arc[1]
 
         internal_name, internal_number = self._add_node_to_network()
         leaf_name, leaf_number = self._add_node_to_network(leaf_name, leaf=True, char_type=char_type)
@@ -781,9 +854,9 @@ class RootedLevelKNetwork:
             for leaf_name in replacement_network.leaf_names:
                 self._add_node_to_network(leaf_name, leaf=True, char_type=char_type)
 
-        # Replace leaf_name with root of replacement network
+        # Replace arc from parent of leaf to leaf with arc from parent of leaf to root of replacement network
         parent_of_leaf = self._in_nodes_of_node(leaf_number_to_replace)[0]
-        self._remove_node_from_network(leaf_number_to_replace)
+        self._remove_arc(parent_of_leaf, leaf_number_to_replace)
         self._add_arc(parent_of_leaf, self.get_node_number_of(replacement_network_root_name + "*"))
 
         # Add all connections from replacement network to current network
@@ -795,6 +868,9 @@ class RootedLevelKNetwork:
                     to_node_name += "*"
                 self._add_arc(internal_node_number, self.get_node_number_of(to_node_name))
 
+        # Remove leaf from network
+        self._remove_node_from_network(leaf_number_to_replace)
+
         if replace_names:
             self.standardize_node_names(char_type)
 
@@ -805,6 +881,7 @@ class RootedLevelKNetwork:
         self.reset_optimization_variables()
 
     def _tail_move(self, moving_arc, target_arc):
+        assert moving_arc != target_arc, "Moving and target arc are equal"
         # Create new place for tail
         new_node_name, new_node_number = self._add_node_to_network()
         self._remove_arc(target_arc[0], target_arc[1])
@@ -1022,8 +1099,10 @@ class RootedLevelKNetwork:
         _, to_nodes = np.where(cut_arc_matrix == 1)
         self._o_cut_arc_sets = []
         for to_node in to_nodes:
-            ca_set = list(self._nodes_below_nodes({to_node}))
-            self._o_cut_arc_sets.append(ca_set)
+            ca_set = [node for node in self._nodes_below_nodes({to_node}) if self._is_leaf_node(node)]
+            if len(ca_set) != 1:
+                self._o_cut_arc_sets.append(ca_set)
+        self._o_cut_arc_sets.append(list(self.leaf_numbers))
 
     def _compute_biconnected_components(self) -> None:
         cut_arc_matrix = self.cut_arc_matrix
@@ -1088,23 +1167,6 @@ class RootedLevelKNetwork:
                     self.visualize()
                     raise NotImplementedError
         self._o_leaf_ordering = tuple(tuple(track) for track in self._o_leaf_ordering)
-
-    # @property
-    # def cut_arc_matrix_old(self) -> np.ndarray:
-    #     if self.__cut_arc_matrix is None:
-    #         self.__cut_arc_matrix = np.zeros((self.number_of_nodes, self.number_of_nodes))
-    #         edges = self._edges()
-    #         for edge in edges:
-    #             from_node, to_node = edge
-    #             self.adj_matrix[from_node][to_node] -= 1
-    #             self.adj_matrix[to_node][from_node] += 1
-    #             components = self.connected_components()
-    #             if len(components) > 1:
-    #                 self.__cut_arc_matrix[from_node][to_node] = 1
-    #                 self.__cut_arc_matrix[to_node][from_node] = 1
-    #             self.adj_matrix[from_node][to_node] += 1
-    #             self.adj_matrix[to_node][from_node] -= 1
-    #     return self.__cut_arc_matrix
 
     # ---------------------------------------------------------------- NODE TYPE METHODS ---------------------------------------------------------------- #
     def is_leaf_node(self, node_name: str) -> bool:
@@ -1228,13 +1290,15 @@ class RootedLevelKNetwork:
                 self._remove_node_from_network(node_number)
                 removed_node_numbers.append(node_number)
                 node_numbers_to_remove.update(parent_numbers)
-
             elif len(parent_numbers) == 0 and len(children_numbers) == 1:
                 self._remove_node_from_network(node_number)
                 removed_node_numbers.append(node_number)
             elif len(parent_numbers) == 1 and len(children_numbers) == 1:
-                self._suppress_node(node_number)
+                arc_added = self._suppress_node(node_number)
                 removed_node_numbers.append(node_number)
+                if not arc_added:
+                    node_numbers_to_remove.update(children_numbers)
+                    node_numbers_to_remove.update(parent_numbers)
 
             # Shift all nodes numbers
             node_numbers_to_remove = {shifted_node_number(node_number, removed_node_numbers) for node_number in node_numbers_to_remove}
@@ -1242,8 +1306,9 @@ class RootedLevelKNetwork:
 
         return original_node_numbers(all_removed_node_numbers)
 
+    # TODO rename
     def prune(self, suppress_redundant: str = 'all', suppress_parallel: bool = True):
-        """Suppress al unnecessary/redundant/parallel nodes/edges in network."""
+        """Suppress al redundant components and parallel arcs in network."""
         changes = True
         while changes:
             changes = False
@@ -1318,22 +1383,22 @@ class RootedLevelKNetwork:
         stable_ancestors_indicis_dict, lowest_stable_ancestor, nodes_between = self._stable_ancestors_of_nodes(node_numbers)
         # TODO: To names
 
-    def visualize(self, file_path: str = None, internal_node_labels=True, edge_labels=False, rankdir='TB', format='png'):
+    def visualize(self, file_path: str = None, internal_node_labels=True, arc_labels=False, rankdir='TB', format='png'):
         """Visualize network."""
         dot = Digraph()
         dot.graph_attr["rankdir"] = rankdir
         dot.engine = 'dot'
-        edges = self.arcs
+        arcs = self.arcs
         for node_name in self.node_name_map:
             if internal_node_labels or self.is_leaf_node(node_name):
                 dot.node(name=node_name, label=node_name, **{'width': str(0.5), 'height': str(0.5)})
             else:
                 dot.node(name=node_name, label="", **{'width': str(0.1), 'height': str(0.1), 'fillcolor': 'black', 'style': 'filled'})
-        for index, edge in enumerate(edges):
-            if edge_labels:
-                dot.edge(edge[0], edge[1], label=str(index))
+        for index, arc in enumerate(arcs):
+            if arc_labels:
+                dot.edge(arc[0], arc[1], label=str(index))
             else:
-                dot.edge(edge[0], edge[1])
+                dot.edge(arc[0], arc[1])
         if file_path:
             dot.format = format
             if file_path[-4:] == f'.{format}':
@@ -1516,7 +1581,7 @@ class RootedLevelKNetwork:
                     self._terminate_nodes({reticulation_to_remove})
                     break
 
-        # self.prune()  # TODO: necessary?
+        self.prune()
 
     def evolve(self, recombination_chance: int = 0) -> (bool, str):
         # Note: does not keep level intact perfectly
@@ -1537,23 +1602,37 @@ class RootedLevelKNetwork:
         self.standardize_node_names()
 
     def enewick(self):
-        return self._enewick(self._root)
+        reticulation_name_map = {reticulation_name: f'{reticulation_name}#H{index}' for index, reticulation_name in enumerate(self.reticulations)}
+        return self._enewick(self._root, reticulation_name_map=reticulation_name_map)
 
-    def _enewick(self, current_node, traversed_nodes=None):
+    def _enewick(self, current_node, traversed_nodes=None, reticulation_name_map=None):
         traversed_nodes = coalesce(traversed_nodes, [])
+
+        # add tag to reticulations
+        node_name = self.get_node_name_of(current_node)
+        if reticulation_name_map and node_name in reticulation_name_map:
+            node_name_tag = reticulation_name_map[node_name]
+        else:
+            node_name_tag = node_name
+
+        # Stop if traversed
         if current_node in traversed_nodes:
-            return self.get_node_name_of(current_node)
+            return node_name_tag
+
+        # update traversed node list
         traversed_nodes.append(current_node)
+
+        # Recurse children
         current_node_children = self._nodes_below_nodes({current_node}, max_depth=1).difference([current_node])
         if len(current_node_children) == 0:
-            return self.get_node_name_of(current_node)
+            return node_name_tag
         elif len(current_node_children) == 1:
             child = current_node_children.pop()
-            return "(" + self._enewick(child, traversed_nodes) + ")" + self.get_node_name_of(current_node)
+            return "(" + self._enewick(child, traversed_nodes, reticulation_name_map=reticulation_name_map) + ")" + node_name_tag
         elif len(current_node_children) == 2:
             child_1 = current_node_children.pop()
             child_2 = current_node_children.pop()
-            return "(" + self._enewick(child_1, traversed_nodes) + ", " + self._enewick(child_2, traversed_nodes) + ")" + self.get_node_name_of(current_node)
+            return "(" + self._enewick(child_1, traversed_nodes, reticulation_name_map=reticulation_name_map) + ", " + self._enewick(child_2, traversed_nodes, reticulation_name_map=reticulation_name_map) + ")" + node_name_tag
         raise ValueError
 
     def __str__(self):
@@ -1591,97 +1670,90 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
         self.symmetrical_nodes = symmetrical_nodes
 
     def build_trinets(self):
-        base_net = copy.deepcopy(self)
+        base_net = self
 
         reticulations = self.leaves_below_nodes(set(self.reticulations), 1)
 
         # --------- Trinets -----------
         # Create iterator of possible combinations of leaves to add
-        all_edges = base_net.internal_arcs
+        internal_arcs = base_net.internal_arcs
         number_of_generator_leaves = len(base_net.leaf_numbers)
-        edges_iterator = itertools.combinations(all_edges, 3 - number_of_generator_leaves)
+        internal_arc_iterator = itertools.combinations(internal_arcs, 3 - number_of_generator_leaves)
 
         # For each possible combination, create trinet and save it to trinets_gen_sides list
         trinet_info_list = NetworkSet(network_size=3)
-        for edges in edges_iterator:
+
+        for arcs in internal_arc_iterator:
             extra_leaf_dict = {}
             # Add extra leaves to base net and save together with underlying generator (self) and added edges
-            current_trinet = copy.deepcopy(base_net)
-            for edge in edges:
-                _, leaf_name = current_trinet.add_leaf_to_edge(edge, char_type='ALPH')
-                extra_leaf_dict[leaf_name] = edge
+            current_trinet = RootedLevelKNetwork.from_rooted_level_k_generator(self)
+            for arc in arcs:
+                _, leaf_name = current_trinet.add_leaf_to_arc(arc, char_type='ALPH')
+                extra_leaf_dict[leaf_name] = arc
             current_trinet.prune()
-
             if current_trinet.number_of_reticulations != self.level:
                 continue
             current_trinet.reset_optimization_variables()
-            current_trinet.calculate_optimization_variables()
-            trinet_info = NetworkInfo(current_trinet, {'generator'        : self, 'generator_name': self.name, 'reticulations': reticulations,
-                                                       'extra_leaf_dict'  : copy.deepcopy(extra_leaf_dict), 'strict_level': self.level,
-                                                       'symmetrical_nodes': self.symmetrical_nodes})
+            trinet_info = NetworkInfo(current_trinet, {'generator'      : self, 'generator_name': self.name, 'reticulations': reticulations,
+                                                       'extra_leaf_dict': copy.deepcopy(extra_leaf_dict), 'symmetrical_nodes': self.symmetrical_nodes})
             trinet_info_list.append(trinet_info)
 
         # In case generator has only one leaf, also add two leaves to the same edge (only need to do one node of every symmetry pair)
         if number_of_generator_leaves == 1:
             extra_leaf_dict = {}
-            edges_iterator = itertools.combinations(all_edges, 1)
-            for edge in edges_iterator:
-                current_trinet = copy.deepcopy(base_net)
-                current_trinet.reset_optimization_variables()
-                new_node_name, leaf_name_1 = current_trinet.add_leaf_to_edge(edge[0], char_type='ALPH')
-                extra_leaf_dict[leaf_name_1] = edge[0]
-                _, leaf_name_2 = current_trinet.add_leaf_to_edge([new_node_name, edge[0][1]], char_type='ALPH')
-                extra_leaf_dict[leaf_name_2] = edge[0]
+            internal_arc_iterator = itertools.combinations(internal_arcs, 1)
+            for arc in internal_arc_iterator:
+                current_trinet = RootedLevelKNetwork.from_rooted_level_k_generator(self)
+                new_node_name, leaf_name_1 = current_trinet.add_leaf_to_arc(arc[0], char_type='ALPH')
+                extra_leaf_dict[leaf_name_1] = arc[0]
+                _, leaf_name_2 = current_trinet.add_leaf_to_arc([new_node_name, arc[0][1]], char_type='ALPH')
+                extra_leaf_dict[leaf_name_2] = arc[0]
 
                 current_trinet.prune()
                 if current_trinet.number_of_reticulations != self.level:
                     continue
                 current_trinet.reset_optimization_variables()
-                current_trinet.calculate_optimization_variables()
                 trinet_info = NetworkInfo(current_trinet, {'generator'      : self, 'generator_name': self.name, 'reticulations': reticulations,
-                                                           'extra_leaf_dict': copy.deepcopy(extra_leaf_dict),
-                                                           'strict_level'   : self.level, 'symmetrical_nodes': self.symmetrical_nodes})
+                                                           'extra_leaf_dict': copy.deepcopy(extra_leaf_dict), 'symmetrical_nodes': self.symmetrical_nodes})
                 trinet_info_list.append(trinet_info)
         return trinet_info_list
 
     def build_binets(self):
-        base_net = copy.deepcopy(self)
+        base_net = self
 
         reticulations = self.leaves_below_nodes(set(self.reticulations), 1)
 
         # --------- Binets -----------
         # Create iterator of possible combinations of leaves to add
-        all_edges = base_net.internal_arcs
+        internal_arcs = base_net.internal_arcs
         number_of_generator_leaves = len(base_net.leaf_numbers)
-        edges_iterator = itertools.combinations(all_edges, 2 - number_of_generator_leaves)
+        internal_arc_iterator = itertools.combinations(internal_arcs, 2 - number_of_generator_leaves)
 
         # For each possible combination, create binet and save it to trinets_gen_sides list
         binet_info_list = NetworkSet(network_size=2)
-        for edges in edges_iterator:
+        for arcs in internal_arc_iterator:
             extra_leaf_dict = {}
             # Add extra leaves to base net and save together with underlying generator (self) and added edges
-            current_binet = copy.deepcopy(base_net)
-            current_binet.reset_optimization_variables()
-            for edge in edges:
-                _, leaf_name = current_binet.add_leaf_to_edge(edge, char_type='ALPH')
-                extra_leaf_dict[leaf_name] = edge
+            current_binet = RootedLevelKNetwork.from_rooted_level_k_generator(self)
+            for arc in arcs:
+                _, leaf_name = current_binet.add_leaf_to_arc(arc, char_type='ALPH')
+                extra_leaf_dict[leaf_name] = arc
             current_binet.prune()
             if current_binet.number_of_reticulations != self.level:
                 continue
             current_binet.reset_optimization_variables()
             current_binet.calculate_optimization_variables()
-            binet_info = NetworkInfo(current_binet, {'generator'        : self, 'generator_name': self.name, 'reticulations': reticulations,
-                                                     'extra_leaf_dict'  : extra_leaf_dict, 'strict_level': self.level,
-                                                     'symmetrical_nodes': self.symmetrical_nodes})
+            binet_info = NetworkInfo(current_binet, {'generator'      : self, 'generator_name': self.name, 'reticulations': reticulations,
+                                                     'extra_leaf_dict': copy.deepcopy(extra_leaf_dict), 'symmetrical_nodes': self.symmetrical_nodes})
             binet_info_list.append(binet_info)
         return binet_info_list
 
     @property
     def sides(self):
-        return self.edge_sides + self.reticulation_sides
+        return self.arc_sides + self.reticulation_sides
 
     @property
-    def edge_sides(self):
+    def arc_sides(self):
         return self.internal_arcs
 
     @property
@@ -1695,7 +1767,7 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
         return reticulation_sides
 
     @property
-    def sets_of_symmetric_edge_sides(self):
+    def sets_of_symmetric_arc_sides(self):
         # TODO: make general
         symmetric_sides_sets_per_generator = {
             '1' : {
@@ -1736,7 +1808,7 @@ class RootedLevelKGenerator(RootedLevelKNetwork):
 
     @property
     def sets_of_symmetric_sides(self):
-        return {**self.sets_of_symmetric_edge_sides, **self.sets_of_symmetric_reticulation_sides}
+        return {**self.sets_of_symmetric_arc_sides, **self.sets_of_symmetric_reticulation_sides}
 
     @property
     def crucial_sets_of_symmetric_sides(self):
@@ -1812,12 +1884,17 @@ class NetworkInfo:
     def calculate_info(self):
         self['cut_arc_sets'] = self.network.cut_arc_sets
         self['strict_level'] = self.network.strict_level
-        self['leaf_order'] = self.network.leaf_ordering
+        self['reticulationless_leaf_order'] = self.network.reticulationless_leaf_order
+        self['leaf_order'] = self.network.leaf_order
+        self['number_of_reticulations'] = self.network.number_of_reticulations
+        self['biconnected'] = bool(len(self['cut_arc_sets']) == 1)
 
-    def add_info(self, network_info, relation_dict):
-        for key, value in network_info.info.items():
+    def add_structure_info(self, network_info, relation_dict):
+        self.info['relation_dict'] = relation_dict
+        for key in ['generator', 'generator_name', 'reticulations', 'extra_leaf_dict', 'symmetrical_nodes']:
+            value = network_info[key]
             if key == 'extra_leaf_dict':
-                self.info[key] = {relation_dict[leaf_name]: edge for leaf_name, edge in value.items()}
+                self.info[key] = {relation_dict[leaf_name]: arc for leaf_name, arc in value.items()}
             else:
                 self.info[key] = value
 
@@ -1895,8 +1972,17 @@ class NetworkSet:
             self.append(network_info)
 
     @classmethod
-    def from_enewick(cls, enewick):
-        return cls(network_info_list=[NetworkInfo(RootedLevelKNetwork.from_enewick(ene), multiplicity=multiplicity) for ene, multiplicity in enewick.items()])
+    def networks_with_reticulations(cls, network_set, reticulation_leaves):
+        result = cls(network_set.network_size)
+        for network_info, weight in network_set.per_network_iterator(method=settings.WEIGHTED_SUM):
+            if set(network_info.network.reticulation_leaves).issubset(reticulation_leaves):
+                result.append(network_info)
+        return result
+
+    @classmethod
+    def from_enewick(cls, enewick, network_size):
+        return cls(network_info_list=[NetworkInfo(RootedLevelKNetwork.from_enewick(ene), multiplicity=multiplicity) for ene, multiplicity in enewick.items()],
+                   network_size=network_size)
 
     @classmethod
     def collapse_network(cls, network: RootedLevelKNetwork, leaf_set: set, multiplicity: int = 1):
@@ -1911,10 +1997,8 @@ class NetworkSet:
             for leaf_to_keep in leaf_numbers_set:
                 new_network = copy.deepcopy(network)
                 new_network._rename_node(leaf_to_keep, mss_name)
-                for leaf_number in leaf_numbers_set.difference([leaf_to_keep]):
-                    new_network._terminate_leaf(leaf_number)
+                new_network._terminate_nodes(leaf_numbers_set.difference([leaf_to_keep]))
                 new_network.prune()
-                # new_network.reset_optimization_variables()
                 result.append(NetworkInfo(new_network, multiplicity=multiplicity))
         return result
 
@@ -1931,25 +2015,31 @@ class NetworkSet:
         result = cls()
         if progress_bar:
             for network_info in tqdm(network_set.per_network_info()):
-                induced_trees = cls.induced_strict_tree_set(network_info.network, network_info.network.number_of_leaves, max_processes,
-                                                            network_info.multiplicity)
+                induced_trees = cls.induced_strict_tree_set(network_info.network, network_size=network_info.network.number_of_leaves, max_processes=max_processes,
+                                                            multiplicity=network_info.multiplicity)
                 result.extend(induced_trees)
         else:
             for network_info in network_set.per_network_info():
-                induced_trees = cls.induced_strict_tree_set(network_info.network, network_info.network.number_of_leaves, max_processes,
-                                                            network_info.multiplicity)
+                induced_trees = cls.induced_strict_tree_set(network_info.network, network_size=network_info.network.number_of_leaves, max_processes=max_processes,
+                                                            multiplicity=network_info.multiplicity)
                 result.extend(induced_trees)
         return result
 
     # ---------------- 1
     @classmethod
-    def induced_network_set_of_network_set(cls, network_info_list, network_size: int, max_processes: int = 1, progress_bar: bool = False):
+    def induced_network_set_of_network_set(cls, network_info_list, network_size: int, progress_bar: bool = False):
         """ Network list containing all exhibited networks of networks in list of certain size """
         assert network_info_list.network_size is None or network_size <= network_info_list.network_size, "Can only create smaller network info lists with smaller network size."
         result = cls(network_size)
-        for network_info, weight in network_info_list.per_network_iterator(method=settings.WEIGHTED_SUM):
-            result.extend(
-                cls.induced_strict_network_set(network_info.network, network_size, max_processes, progress_bar=False, multiplicity=weight))
+
+        if progress_bar:
+            for network_info, weight in tqdm(network_info_list.per_network_iterator(method=settings.WEIGHTED_SUM)):
+                result.extend(
+                    cls.induced_strict_network_set(network_info.network, network_size, 1, progress_bar=False, multiplicity=weight))
+        else:
+            for network_info, weight in network_info_list.per_network_iterator(method=settings.WEIGHTED_SUM):
+                result.extend(
+                    cls.induced_strict_network_set(network_info.network, network_size, 1, progress_bar=False, multiplicity=weight))
         return result
 
     # ---------------- 1.1
@@ -1961,11 +2051,14 @@ class NetworkSet:
             return cls._induced_strict_network_set_recursive(network, network_size, max_processes, progress_bar, network.leaf_names, 0, multiplicity)
         elif method == settings.ITERATIVE:
             return cls.induced_strict_network_set_iterative(network, network_size, max_processes, progress_bar, multiplicity)
+        else:
+            raise ValueError
 
     # ---------------- 1.1.1
     @classmethod
     def _induced_strict_network_set_recursive(cls, network: RootedLevelKNetwork, network_size: int, max_processes: int, progress_bar: bool, leaf_names: list,
                                               index: int, multiplicity: int = 1):
+        raise NotImplementedError
         result = cls(network_size=network_size)
         number_of_leaves = network.number_of_leaves
         if number_of_leaves == network_size:
@@ -2078,6 +2171,8 @@ class NetworkSet:
     def _displayed_trees_recursive(cls, network_info_list, reticulation_names: list, max_processes: int = 1, progress_bar: bool = False):
         result = cls(network_size=network_info_list.network_size)
         if len(reticulation_names) == 0:
+            for network_info in network_info_list.per_network_info():
+                network_info.network.prune()
             return network_info_list
         else:
             if max_processes == 1:
@@ -2119,17 +2214,17 @@ class NetworkSet:
     def suppress_reticulation(cls, network: RootedLevelKNetwork, reticulation_name, multiplicity: int = 1):
         result = cls()
 
-        # Check if reticulation has not been removed
+        # Check if reticulation has been removed
         if reticulation_name not in network.node_name_map:
             new_network = copy.deepcopy(network)
-            result.append(NetworkInfo(new_network, multiplicity=multiplicity))
+            result.append(NetworkInfo(new_network, multiplicity=multiplicity * 2))  # binary --> times 2
             return result
         reticulation_number = network.get_node_number_of(reticulation_name)
 
         # If node is not a reticulation, do nothing
         if not network._is_reticulation_node(reticulation_number):
             new_network = copy.deepcopy(network)
-            result.append(NetworkInfo(new_network, multiplicity=multiplicity))
+            result.append(NetworkInfo(new_network, multiplicity=multiplicity * 2))
             return result
 
         # Else, create a network where only the edge between the reticulation and one of its parents is kept
@@ -2195,7 +2290,7 @@ class NetworkSet:
     # ----------------- 3.1.1
     @classmethod
     def _induced_strict_tree_set_helper(cls, tree_info):
-        return cls.displayed_trees(tree_info.network, multiplicity=tree_info.multiplicity)
+        return cls.displayed_trees(tree_info.network, multiplicity=tree_info.multiplicity, progress_bar=False)
 
     # ----------------- 4
     @classmethod
@@ -2236,7 +2331,57 @@ class NetworkSet:
                 result.append(NetworkInfo(sub_tree, multiplicity=tree_info.multiplicity))
         return result
 
+    # ---------------------..
+    @classmethod
+    def subnets_from_generators(cls, generators, leaves_per_internal_arc):
+        result = cls()
+        for generator in generators:
+            result.append(NetworkInfo(RootedLevelKNetwork.subnet_from_rooted_level_k_generator(generator, leaves_per_internal_arc)))
+        return result
+
     # -------------------------------- NOISE METHODS -------------------------------#
+    @classmethod
+    def distort(cls, network_set, Q_u, Q_tm, Q_d, network_info_pool, max_replacement_level):
+        assert Q_u + Q_tm + Q_d <= 1
+        result = cls(network_size=network_set.network_size)
+        max_replacement_level_pool = cls.networks_where(network_info_pool, 'number_of_reticulations', max_replacement_level, lambda x, y: x <= y)
+        for network_info in network_set.per_network_info():
+            Q = random.uniform(0, 1)
+            if Q <= Q_u:
+                random_network_info = np.random.choice(list(max_replacement_level_pool.per_network_info()))
+                replacement_network_info = copy.deepcopy(random_network_info)
+                leaf_names = network_info.network.leaf_names
+                replacement_leaf_names = replacement_network_info.network.leaf_names
+                for replacement_leaf_name, leaf_name in zip(replacement_leaf_names, leaf_names):
+                    replacement_network_info.network.rename_node(replacement_leaf_name, leaf_name)
+                result.append(replacement_network_info)
+            elif Q <= Q_u + Q_tm:
+                network = copy.deepcopy(network_info.network)
+                while True:
+                    moving_arc = random.sample(network.movable_arcs, 1)[0]
+                    nodes_below_moving_arc = network.nodes_below_nodes({moving_arc[0]})
+                    all_arcs = network.arcs
+                    all_arcs.remove(moving_arc)
+                    all_arcs = [arc for arc in all_arcs if
+                                arc[1] != moving_arc[1] and
+                                arc[0] not in nodes_below_moving_arc]
+                    if network.is_tree_node(moving_arc[0]):
+                        parent_moving_arc = network.nodes_above_nodes({moving_arc[0]}, max_height=1).difference({moving_arc[0]}).pop()
+                        all_arcs.remove((parent_moving_arc, moving_arc[0]))
+                    if len(all_arcs) > 0:
+                        target_arc = random.sample(all_arcs, 1)[0]
+                        network.tail_move(moving_arc, target_arc)
+                        if network.strict_level > network.level:
+                            network = copy.deepcopy(network_info.network)
+                            continue
+                        result.append(NetworkInfo(network, multiplicity=network_info.multiplicity))
+                        break
+            elif Q <= Q_u + Q_tm + Q_d:
+                pass
+            else:
+                result.append(copy.deepcopy(network_info))
+        return result
+
     @classmethod
     def uniform_distort(cls, network_set, prob, network_info_pool):
         assert 0 <= prob <= 1, "Probability must be between 0 and 1"
@@ -2258,11 +2403,11 @@ class NetworkSet:
     def deletion_distort(cls, network_set, prob):
         assert 0 <= prob <= 1, "Probability must be between 0 and 1"
         result = cls(network_size=network_set.network_size)
-        for network in network_set.per_network_info():
+        for network_info in network_set.per_network_info():
             if random.uniform(0, 1) <= prob:
                 pass
             else:
-                result.append(copy.deepcopy(network))
+                result.append(copy.deepcopy(network_info))
         return result
 
     @classmethod
@@ -2279,35 +2424,78 @@ class NetworkSet:
                 all_arcs = [arc for arc in all_arcs if
                             arc[1] != moving_arc[1] and
                             arc[0] not in nodes_below_moving_arc]
+                if network.is_tree_node(moving_arc[0]):
+                    parent_moving_arc = network.nodes_above_nodes({moving_arc[0]}, max_height=1).difference({moving_arc[0]}).pop()
+                    all_arcs.remove((parent_moving_arc, moving_arc[0]))
                 if len(all_arcs) == 0:
                     raise NotImplementedError("Could not find a target arc")
                 target_arc = random.sample(all_arcs, 1)[0]
                 network.tail_move(moving_arc, target_arc)
+
+                if len(network.roots) != 1:
+                    raise NotImplementedError("Tail move results in more than 1 root")
             result.append(NetworkInfo(network, multiplicity=network_info.multiplicity))
-            if len(network.roots) != 1:
-                raise NotImplementedError("Tail move results in more than 1 root")
+
         return result
 
-    def summary(self):
+    @classmethod
+    def from_text_enewick(cls, file_path, network_size=3, sep=';'):
+        result = cls(network_size)
+        with open(file_path, 'r') as f:
+            data = f.read()
+        data = data.split(sep)
+        for d in data:
+            try:
+                network = RootedLevelKNetwork.from_enewick(d)
+            except:
+                print(d)
+                raise NotImplementedError
+            result.append(NetworkInfo(network))
+        return result
+
+    @classmethod
+    def from_text_trinet_format(cls, file_path, progress_bar=False):
+        result = cls(3)
+        with open(file_path, 'r') as f:
+            data = f.read()
+        data = data.split('\n')
+        if progress_bar:
+            for d in tqdm(data):
+                index = d.index('Tr{')
+                d = d[index:]
+                network = RootedLevelKNetwork.from_trinet_format(d)
+                result.append(NetworkInfo(network))
+        else:
+            for d in data:
+                index = d.index('Tr{')
+                d = d[index:]
+                network = RootedLevelKNetwork.from_trinet_format(d)
+                result.append(NetworkInfo(network))
+        return result
+
+    def summary(self, depth=None):
+        depth = coalesce(depth, [0,1])
         # Compute properties of this network set
-        summary_0 = self._analyse_networks()
+        if 0 in depth:
+            summary_0 = self._analyse_networks()
+        else:
+            summary_0 = dict()
+        if 1 in depth:
+            # Compute properties of network set of one size smaller
+            network_info_list_1 = NetworkSet.induced_network_set_of_network_set(self, self.network_size - 1, progress_bar=False)
+            summary_1 = network_info_list_1._analyse_networks()
 
-        # Compute properties of network set of one size smaller
-        network_info_list_1 = NetworkSet.induced_network_set_of_network_set(self, self.network_size - 1)
-        summary_1 = network_info_list_1._analyse_networks()
-
-        # Summary
-        summary_0['inconsistency-1'] = summary_1['inconsistency-0']
-        summary_0['certainty-1'] = summary_1['certainty-0']
+            summary_0['inconsistency-1'] = summary_1['inconsistency-0']
+            summary_0['certainty-1'] = summary_1['certainty-0']
 
         return summary_0
 
-    def _analyse_networks(self) -> (dict, float, float, float):
+    def _analyse_networks(self, method: int = settings.WEIGHTED_AVERAGE) -> (dict, float, float, float):
         assert self.network_size is not None, "Can not create summary of network set without a given size"
         # Number of different n-sets
         represented_leaves = self.represented_leaves()
         number_of_represented_leaves = len(represented_leaves)
-        number_of_n_sets = ncr(self.network_size, len(represented_leaves))
+        number_of_n_sets = ncr(len(represented_leaves), self.network_size)
 
         # Number of n-sets described by self
         described_n_sets = len(self)
@@ -2324,11 +2512,11 @@ class NetworkSet:
         inconsistency = (unique_networks - described_n_sets) / described_n_sets
         certainty = 0
         n_set_iterator = itertools.combinations(represented_leaves, self.network_size)
-        for n_set in n_set_iterator:
+        for n_set in tqdm(n_set_iterator):
             name = tuple(sorted(n_set))
             n_set_certainty = 1
             empty = False
-            for _, weight in self.per_network_iterator(method=settings.WEIGHTED_AVERAGE, name=name):
+            for _, weight in self.per_network_iterator(method=method, name=name):
                 n_set_certainty *= weight
                 empty = True
             n_set_certainty *= (1 - empty)
@@ -2355,52 +2543,17 @@ class NetworkSet:
         for network_info in self.per_network_info():
             network_info.calculate_info()
 
-    def add_info(self, network_info_list):
+    def add_structure_info(self, network_info_list):
         for network_info in self.per_network_info():
             equal_structured_network, relation_dict = network_info_list.find_equal_structured_network(network_info)
             if equal_structured_network:
-                network_info.add_info(equal_structured_network, relation_dict)
-                network_info['cut_arc_sets'] = [[relation_dict[node] for node in cut_arc_set]
-                                                for cut_arc_set in equal_structured_network['cut_arc_sets']]
-                network_info['relation_dict'] = relation_dict
-                network_info['leaf_order'] = network_info.network.leaf_ordering
+                network_info.add_structure_info(equal_structured_network, relation_dict)
             else:
-                network_info.calculate_info()
-
-    # ------------------- MISC -
-    def check_correct(self):
-        for network_info, w in self.per_network_iterator(method=settings.WEIGHTED_SUM):
-            s = 0
-            e = [network_info]
-            for network_info_other, w_other in self.per_network_iterator(method=settings.WEIGHTED_SUM, name=network_info.name()):
-                if network_info.uid == network_info_other.uid:
-                    pass
-                equal, _, _ = network_info.network.equal_structure(network_info_other.network, equal_naming=self.equal_naming)
-                if equal:
-                    e.append(network_info_other)
-                    s += 1
-            if s > 1:
-                return False
-        return True
-
-    def sum_duplicates(self):
-        for name, dictionary in self:
-            network_info_set = self[name]['network_info_set']
-            for network_info in network_info_set:
-                equal_network_infos = []
-                w = 0
-                for network_info_other, w_other in self.per_network_iterator(method=settings.WEIGHTED_SUM):
-                    equal, _, _ = network_info.network.equal_structure(network_info_other.network, equal_naming=self.equal_naming, optimize=False)
-                    if equal:
-                        equal_network_infos.append(network_info_other)
-                        w += w_other
-                if len(equal_network_infos) > 1:
-                    for equal_network_info in equal_network_infos[1:]:
-                        network_info_set.remove(equal_network_info)
-                    equal_network_infos[0].multiplicity = w
+                network_info.network.visualize()
+                raise NotImplementedError
 
     # ------------------ CONSISTENCY SCORE -------------- #
-    def consistency_score(self, other, method: int = settings.WEIGHTED_SUM):
+    def consistency_score(self, other, method):
         intersection = 0
         network_set_len = 0
         for network_info, w in self.per_network_iterator(method=method):
@@ -2417,17 +2570,24 @@ class NetworkSet:
         return intersection / network_set_len
 
     # ------------------ COUNT METHODS ------------------ #
-    def per_network_iterator(self, method: int = settings.MAXIMUM_MULTIPLICITY, name=None):
+    def per_name_iterator(self, leaf_names, method):
+        assert self.network_size, "Can only iterate per name if network_size is defined"
+        name_iterator = itertools.combinations(leaf_names, self.network_size)
+        for name in name_iterator:
+            name = tuple(sorted(name))
+            yield from self.per_network_iterator(method=method, name=name, empty_names=True)
+
+    def per_network_iterator(self, method, name=None, empty_names: bool = False):
         if method == settings.MAXIMUM_MULTIPLICITY:
-            return self.maximum_multiplicity_iterator(name)
+            return self.maximum_multiplicity_iterator(name, empty_names)
         elif method == settings.WEIGHTED_AVERAGE:
-            return self.weighted_average_iterator(name)
+            return self.weighted_average_iterator(name, empty_names)
         elif method == settings.WEIGHTED_SUM:
-            return self.weighted_sum_iterator(name)
+            return self.weighted_sum_iterator(name, empty_names)
         else:
             raise ValueError
 
-    def maximum_multiplicity_iterator(self, name=None):
+    def maximum_multiplicity_iterator(self, name=None, empty_names=False):
         if name:
             if name in self.dictionary.keys():
                 dictionary = self[name]
@@ -2438,6 +2598,8 @@ class NetworkSet:
                         maximum_multiplicity = network_info.multiplicity
                         corresponding_network_info = network_info
                 yield corresponding_network_info, 1
+            elif empty_names:
+                yield name, None
         else:
             for name, dictionary in self:
                 maximum_multiplicity = -np.inf
@@ -2448,32 +2610,36 @@ class NetworkSet:
                         corresponding_network_info = network_info
                 yield corresponding_network_info, 1
 
-    def weighted_average_iterator(self, name=None):
+    def weighted_average_iterator(self, name=None, empty_names: bool = False):
         if name:
             if name in self.dictionary.keys():
                 dictionary = self[name]
                 volume = dictionary['volume']
                 for network_info in dictionary['network_info_set']:
                     yield network_info, network_info.multiplicity / volume
+            elif empty_names:
+                yield name, None
         else:
             for name, dictionary in self:
                 volume = dictionary['volume']
                 for network_info in dictionary['network_info_set']:
                     yield network_info, network_info.multiplicity / volume
 
-    def weighted_sum_iterator(self, name=None):
+    def weighted_sum_iterator(self, name=None, empty_names: bool = False):
         if name:
             if name in self.dictionary.keys():
                 dictionary = self[name]
                 for network_info in dictionary['network_info_set']:
                     yield network_info, network_info.multiplicity
+            elif empty_names:
+                yield name, None
         else:
             for name, dictionary in self:
                 for network_info in dictionary['network_info_set']:
                     yield network_info, network_info.multiplicity
 
     # ------------------------------- COUNTING METHODS ----------------------------------- #
-    def count_category(self, category: str, method: int = settings.MAXIMUM_MULTIPLICITY):
+    def count_category(self, category: str, method: int):
         result = {}
         for network_info, w in self.per_network_iterator(method=method):
             key = network_info[category]
@@ -2567,12 +2733,12 @@ class NetworkSet:
         return result
 
     @classmethod
-    def networks_where(cls, network_set, category, value):
+    def networks_where(cls, network_set, category, value, relation=lambda x, y: x == y):
         result = cls(network_size=network_set.network_size)
         for name, dictionary in network_set:
             new_dictionary = {'volume': 0, 'network_info_set': set()}
             for network_info in dictionary['network_info_set']:
-                if network_info[category] == value:
+                if relation(network_info[category], value):
                     new_dictionary['network_info_set'].add(network_info)
                     new_dictionary['volume'] += network_info.multiplicity
             if new_dictionary['volume'] != 0:
@@ -2672,10 +2838,11 @@ class Omega:
                 self.arc_weights[arc] = 0
 
     @classmethod
-    def from_network_info_list(cls, network_info_list: NetworkSet, method=settings.MAXIMUM_MULTIPLICITY):
+    def from_network_info_list(cls, network_info_list: NetworkSet, count_method, fill_gaps):
         result = cls(node_set=network_info_list.represented_leaves())
-        if method == settings.MAXIMUM_MULTIPLICITY:
-            for network_info, weight in network_info_list.maximum_multiplicity_iterator():
+        # TODO: Test
+        for network_info, weight in network_info_list.per_name_iterator(leaf_names=network_info_list.represented_leaves(), method=count_method):
+            if weight:
                 cut_arc_sets = network_info['cut_arc_sets']
                 for cut_arc_set in cut_arc_sets:
                     if len(cut_arc_set) == 2:
@@ -2683,9 +2850,13 @@ class Omega:
                         y = cut_arc_set[1]
                         z = [Z for Z in network_info.network.leaf_names if Z not in cut_arc_set][0]
                         for i in (x, y):
-                            result.increase_weight(i, z, 1)
-        else:
-            raise NotImplementedError
+                            result.increase_weight(i, z, weight)
+            elif fill_gaps:
+                leaves = network_info
+                two_leaf_iterator = itertools.permutations(leaves, 2)
+                for two_leaves in two_leaf_iterator:
+                    i, z = two_leaves
+                    result.increase_weight(i, z, fill_gaps / 3)
         return result
 
     def add_node(self, node):
@@ -2695,46 +2866,46 @@ class Omega:
             self.arc_weights[(other_node, node)] = 0
         self.node_set.add(node)
 
-    def increase_weight(self, from_node, to_node, w: int = 1):
+    def increase_weight(self, from_node, to_node, w: float = 1):
         assert {from_node, to_node}.issubset(self.node_set), f"Can not add weight to arc {(from_node, to_node)} as it is not in the graph"
         self.arc_weights[(from_node, to_node)] += w
 
     def augmented_graph(self, threshold=0):
-        auxiliary_digraph = dict()
+        auxiliary_digraph = {node: set() for node in self.node_set}
         arc_iterator = itertools.permutations(self.node_set, 2)
         for arc in arc_iterator:
             weight = self.arc_weights[arc]
             if weight <= threshold:
-                if arc[0] in auxiliary_digraph:
-                    auxiliary_digraph[arc[0]].add(arc[1])
-                else:
-                    auxiliary_digraph[arc[0]] = {arc[1]}
+                auxiliary_digraph[arc[0]].add(arc[1])
         return auxiliary_digraph
 
     def minimum_weight(self):
-        arc_iterator = itertools.permutations(self.node_set, 2)
-        return min([self.arc_weights[arc] for arc in arc_iterator])
+        return min(self.arc_weights.values())
 
-    def minimal_sink_sets(self, method: int = settings.DEFAULT_SINK_SET):
+    def minimal_sink_sets(self, method: int):
         # TODO check complexity and maybe do something smarter
-        if method == settings.DEFAULT_SINK_SET:
+        if method == settings.FIRST_SCC_THAT_IS_MSS:
             return self.minimal_sink_sets_default()
+        elif method == settings.EXPAND_FIRST_SCC:
+            return self.minimal_sink_sets_expand()
         else:
             raise ValueError
 
     def minimal_sink_sets_default(self):
-        # Maybe maximum cut in undirected network where weight is sum of directed arc weights
-        threshold = self.minimum_weight()
-        sub_graph = self.augmented_graph(threshold)
-        strongly_connected_components = tarjan(sub_graph)
-        minimal_sink_sets_sets = self.strongly_connected_components_to_minimal_sink_sets(strongly_connected_components, sub_graph)
-        return minimal_sink_sets_sets, 1  # TODO score
+        weights = self.arc_weights.values()
+        for threshold in sorted(weights):
+            sub_graph = self.augmented_graph(threshold)
+            strongly_connected_components = tarjan(sub_graph)
+            minimal_sink_set = self.strongly_connected_components_to_minimal_sink_set_default(strongly_connected_components, sub_graph)
+            if minimal_sink_set:
+                return minimal_sink_set
+        self.visualize(threshold=100)
+        raise NotImplementedError("No threshold gives a minimal sink-set")
 
     @staticmethod
-    def strongly_connected_components_to_minimal_sink_sets(strongly_connected_components, sub_graph):
-        trivial_sink_sets = []
+    def strongly_connected_components_to_minimal_sink_set_default(strongly_connected_components, sub_graph):
+        # Find minimal sink-sets
         minimal_sink_sets = []
-        # print(f"SCC: {strongly_connected_components}")
         for strongly_connected_component in strongly_connected_components:
             for node in strongly_connected_component:
                 if node in sub_graph.keys():
@@ -2742,62 +2913,63 @@ class Omega:
                     if not set(to_leaves).issubset(strongly_connected_component):
                         break
             else:
-                if len(strongly_connected_component) == 1:
-                    trivial_sink_sets.append(strongly_connected_component)
-                else:
+                if len(strongly_connected_component) > 1:
                     minimal_sink_sets.append(strongly_connected_component)
+        if len(minimal_sink_sets) > 0:
+            smallest_mss_index = int(np.argmin([len(mss) for mss in minimal_sink_sets]))
+            return minimal_sink_sets[smallest_mss_index]
+        else:
+            return None
 
-        # print(f"MSS: {minimal_sink_sets}")
-        # print(f"TSS: {trivial_sink_sets}")
+    def minimal_sink_sets_expand(self):
+        # Maybe maximum cut in undirected network where weight is sum of directed arc weights
+        threshold = self.minimum_weight()
+        sub_graph = self.augmented_graph(threshold)
+        strongly_connected_components = tarjan(sub_graph)
+        minimal_sink_set = self.strongly_connected_components_to_minimal_sink_set_expand(strongly_connected_components, sub_graph)
+        return minimal_sink_set
 
-        # Extend trivial sink-sets to minimal sink-sets
-        minimal_extended_trivial_sink_sets = []
-        for tss in trivial_sink_sets:
-            # print(f"Extending TSS: {tss}")
-            extended_trivial_sink_sets = []
-            node = tss[0]
-            parents_node = {from_node for from_node, to_nodes in sub_graph.items() if node in to_nodes}
-            # Extend trivial ss for each parent node
-            for parent_node in parents_node:
-                # Find SCC in which parent_node is contained
-                for scc in strongly_connected_components:
-                    if parent_node in scc:
-                        # Extend ss for this node
-                        extended_ss = [node] + scc
-                        out_nodes = set(itertools.chain.from_iterable([sub_graph[n] for n in extended_ss if n in sub_graph.keys()])).difference(extended_ss)
-                        while out_nodes:
-                            extended_ss.extend(out_nodes)
-                            out_nodes = set(itertools.chain.from_iterable([sub_graph[n] for n in extended_ss if n in sub_graph.keys()])).difference(
-                                extended_ss)
+    @staticmethod
+    def strongly_connected_components_to_minimal_sink_set_expand(strongly_connected_components, sub_graph):
+        # Create condensed graph
+        condensed_graph = {}
+        for i, SCC in enumerate(strongly_connected_components):
+            condensed_graph[i] = set()
+            for node in SCC:
+                to_nodes = sub_graph[node]
+                for to_node in to_nodes:
+                    j = next(i for i, SCC in enumerate(strongly_connected_components) if to_node in SCC)
+                    condensed_graph[i].add(j)
 
-                        # print(f"Extended TSS to: {extended_ss}")
-                        # Check if sink set intersects any of the minimal sink-sets
-                        if not set(extended_ss).intersection(itertools.chain.from_iterable(minimal_sink_sets)):
-                            extended_trivial_sink_sets.append(extended_ss)
-                            # print("Succesfull extension")
-            # print(f"ETSS: {extended_trivial_sink_sets}")
+        # Find: SCC of size at least two with out-degree 0 | SCC with out-degree > 1
+        parent_sink_sets = []
+        minimal_sink_sets = []
+        for i, SCC in enumerate(strongly_connected_components):
+            if len(condensed_graph[i]) == 0 and len(SCC) > 1:
+                minimal_sink_sets.append(SCC)
+            elif len(condensed_graph[i]) >= 1:
+                parent_sink_sets.append(i)
 
-            # Take only those etss that are not superset of others --> these are minimal sink-sets
-            extended_trivial_sink_sets = sorted(extended_trivial_sink_sets, key=len, reverse=True)
+        # Return smallest minimal sink-set if one exists
+        if len(minimal_sink_sets) != 0:
+            smallest_mss_index = int(np.argmin([len(mss) for mss in minimal_sink_sets]))
+            return minimal_sink_sets[smallest_mss_index]
 
-            for index, etss in enumerate(extended_trivial_sink_sets):
-                for etss_other in extended_trivial_sink_sets[index + 1:]:
-                    if set(etss).issuperset(etss_other):
-                        # print(f"Extension {etss} is superset of {etss_other}")
-                        break
-                else:
-                    minimal_extended_trivial_sink_sets.append(etss)
-            # print(f"METSS: {minimal_extended_trivial_sink_sets}")
+        # Else extend an internal node of the condensed graph with its descendants
+        else:
+            for i in parent_sink_sets:
+                MSS = {i}
+                new_nodes = condensed_graph[i]
+                while not new_nodes.issubset(MSS):
+                    MSS.update(new_nodes)
+                    new_nodes = set(itertools.chain.from_iterable(condensed_graph[SCC] for SCC in new_nodes))
+                minimal_sink_sets.append(list(itertools.chain.from_iterable([strongly_connected_components[node] for node in MSS])))
 
+            # Return smallest sink-set
+            smallest_mss_index = int(np.argmin([len(mss) for mss in minimal_sink_sets]))
+            return minimal_sink_sets[smallest_mss_index]
 
-        chosen_combination = []
-        for metss in sorted(minimal_extended_trivial_sink_sets, key=len):
-            if len(set(metss).intersection(itertools.chain.from_iterable(chosen_combination))) == 0:
-                chosen_combination.append(metss)
-
-        return chosen_combination + minimal_sink_sets
-
-    def visualize(self, file_path: str = None, edge_labels=True, threshold: int = 0):
+    def visualize(self, file_path: str = None, arc_labels=True, threshold: int = 0, format='png'):
         dot = Digraph()
         dot.engine = 'dot'
 
@@ -2806,16 +2978,16 @@ class Omega:
         for arc, weight in self.arc_weights.items():
             if weight > threshold:
                 continue
-            if edge_labels:
+            if arc_labels:
                 dot.edge(arc[0], arc[1], label=str(weight))
             else:
                 dot.edge(arc[0], arc[1])
         if file_path:
-            dot.format = 'png'
-            if file_path[-4:] == '.png':
-                dot.render(filename=file_path[:-4], format='png')
+            dot.format = format
+            if file_path[-4:] == f'.{format}':
+                dot.render(filename=file_path[:-4], format=format)
             else:
-                dot.render(filename=file_path, format='png')
+                dot.render(filename=file_path, format=format)
         else:
             dot.render(view=True)
             time.sleep(0.2)

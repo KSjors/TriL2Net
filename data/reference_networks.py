@@ -21,13 +21,13 @@ def pickle_read(filename):
     return result
 
 
-def regenerate_standard_networks() -> None:
+def regenerate_standard_binets_trinets() -> None:
     """Regenerate and save all possible trinets."""
     logging.debug("Regenerating all possible trinets and saving them.")
 
     # All generators per level
     all_generators = {
-        0: [generators.generator_level0]
+        0  : [generators.generator_level0]
         , 1: [generators.generator_level1]
         , 2: [generators.generator_A, generators.generator_B, generators.generator_C, generators.generator_D]
     }
@@ -47,21 +47,25 @@ def regenerate_standard_networks() -> None:
 
     # From binets create trinets with two biconnected components
     two_component_trinet_list = NetworkSet()
-    two_binet_infos_iterator = itertools.combinations(biconnected_binet_list, 2)
+    two_binet_infos_iterator = itertools.product(biconnected_binet_list.per_network_info(), repeat=2)
     for binet_infos in two_binet_infos_iterator:
-        previous_two_component_trinet = None
         for index, leaf_name in enumerate(binet_infos[0].network.leaf_names):
             two_component_trinet = copy.deepcopy(binet_infos[0].network)
             two_component_trinet.replace_leaf_with_network(leaf_name, binet_infos[1].network, replace_names=True, char_type='ALPH')
-            if index == 0 or not two_component_trinet.equal_structure(previous_two_component_trinet):
-                two_component_trinet_list.append(NetworkInfo(two_component_trinet))
-            previous_two_component_trinet = two_component_trinet
+            two_component_trinet_list.append(NetworkInfo(two_component_trinet))
 
     two_component_trinet_list.extend(biconnected_trinet_list)
     biconnected_trinet_list.extend(biconnected_binet_list)
-    two_component_trinet_list.set_multiplicities_to_one()
+    for network_info in biconnected_binet_list.per_network_info():
+        network_info.network.reset_optimization_variables()
+        network_info.network.calculate_optimization_variables()
     biconnected_trinet_list.calculate_info()
+    two_component_trinet_list.set_multiplicities_to_one()
+    for network_info in two_component_trinet_list.per_network_info():
+        network_info.network.reset_optimization_variables()
+        network_info.network.calculate_optimization_variables()
     two_component_trinet_list.calculate_info()
+
 
     pickle_out = open("data/all_networks_save.pickle", 'wb')
     data = [all_generators, biconnected_trinet_list, two_component_trinet_list]
@@ -69,7 +73,7 @@ def regenerate_standard_networks() -> None:
     pickle_out.close()
 
 
-def get_standard_networks() -> (list, NetworkSet):
+def get_standard_binets_trinets() -> (list, NetworkSet):
     """Read and retrieve all possible trinets."""
     logging.debug("Reading and retrieving all possible trinets.")
     pickle_in = open("data/all_networks_save.pickle", 'rb')
@@ -77,3 +81,14 @@ def get_standard_networks() -> (list, NetworkSet):
     pickle_in.close()
     all_generators, biconnected_trinet_binet_list, all_trinet_list = result[0], result[1], result[2]
     return all_generators, biconnected_trinet_binet_list, all_trinet_list
+
+
+LEVEL_1_2_GENERATORS, BICONNECTED_BINET_TRINET_LIST, TRINET_LIST = get_standard_binets_trinets()
+
+
+# for ti in TRINET_LIST.per_network_info():
+#     n = ti.network
+#     if n.number_of_reticulations == 1 and n.biconnected:
+#         ti.network.visualize()
+#
+# kk

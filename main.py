@@ -41,10 +41,12 @@ logging.getLogger('').addHandler(console)
 logging.getLogger('network').addHandler(fh)
 
 import os
-from datastructures.rooted_level_k_network import RootedLevelKNetwork, NetworkSet
-from data.all_trinets import get_standard_networks, regenerate_standard_networks, pickle_save, pickle_read
+from datastructures.rooted_level_k_network import RootedLevelKNetwork, NetworkSet, Omega
+from data.reference_networks import get_standard_binets_trinets, regenerate_standard_binets_trinets, pickle_save, pickle_read
 from utils.help_functions import *
 from data.ETS_network import ETS_NETWORK_dict
+from data.generators import *
+from config import settings
 
 if __name__ == '__main__':
     config = {
@@ -74,8 +76,8 @@ if __name__ == '__main__':
 
     """ Build or load trinets """
     if config['rebuild_generators']:
-        regenerate_standard_networks()
-    _, biconnected_trinet_binet_list, all_trinet_list = get_standard_networks()
+        regenerate_standard_binets_trinets()
+    _, biconnected_trinet_binet_list, all_trinet_list = get_standard_binets_trinets()
 
     """ Build or load network """
     if config['rebuild_network']:
@@ -104,7 +106,7 @@ if __name__ == '__main__':
     if config['rebuild_trinets'] or config['rebuild_network']:
         trinet_info_list = NetworkSet.induced_strict_network_set(network, 3, 1, True, method='Iterative')
         pickle_save('data/trinets', trinet_info_list)
-    trinet_info_list = pickle_read('data/trinets')
+    # trinet_info_list = pickle_read('data/trinets')
 
     """ Distort trinets """
     if config['rebuild_trinets'] or config['rebuild_network']:
@@ -126,27 +128,22 @@ if __name__ == '__main__':
         pickle_save('data/distorted_trinets', distorted_trinet_info_list)
         if distorted:
             print(distorted_trinet_info_list.summary())
-    distorted_trinet_info_list = pickle_read('data/distorted_trinets')
-
-    # network.visualize()
-    # solver = Solver(all_trinet_list, distorted_trinet_info_list)
-    # network_result = solver.solve()
-    # print(network.equal_structure(network_result))
-
-    movable_arcs = network.movable_arcs
-    network.tail_move(('16', 'f'),  movable_arcs[1])
-    network.visualize()
+    # distorted_trinet_info_list = pickle_read('data/distorted_trinets')
 
 
 
-
-
-
-    # network = RootedLevelKNetwork()
-    # network.terminate_leaves(leaf_names_to_terminate=['H. californicus', 'H. eggertii', 'H. hirsutus', 'H. laevigatus', 'H. schweinitzii'])
-    # network.visualize(internal_node_labels=False, edge_labels=False, rankdir='LR', format='pdf', file_path='ETS_network')
-
-    # triplet_1 = distorted_trinet_info_list[4].network
-    # triplet_2 = distorted_trinet_info_list[9].network
-    # triplet_1.visualize(internal_node_labels=False, edge_labels=False, rankdir='LR', format='pdf', file_path='example_network_l1_trinet_1')
-    # triplet_2.visualize(internal_node_labels=False, edge_labels=False, rankdir='LR', format='pdf', file_path='example_network_l1_trinet_2')
+    # enewick = '((((c, d)3, b)2, a)1, (((e, f)6, (((h, i)9, (j)10)8, g)7)5, ((10, (k, 14)13)12, ((l)14, m)15)11)4)0'
+    # b = RootedLevelKNetwork.from_enewick(enewick)
+    # T = NetworkSet.displayed_trees(b)
+    # ts = []
+    # for t in T.per_network_info():
+    #     ts.append(t.network)
+    #
+    # T1 = RootedLevelKNetwork.restrict(ts[0], list('afhijk'))
+    # T2 = RootedLevelKNetwork.restrict(ts[-1], list('cehijl'))
+    #
+    # T1.visualize(internal_node_labels=False, rankdir='LR', file_path=None, format='pdf')
+    # T2.visualize(internal_node_labels=False, rankdir='LR', file_path=None, format='pdf')
+    #
+    # T1.visualize(internal_node_labels=False, rankdir='LR', file_path='exhibited_cluster_1', format='pdf')
+    # T2.visualize(internal_node_labels=False, rankdir='LR', file_path='exhibited_cluster_2', format='pdf')

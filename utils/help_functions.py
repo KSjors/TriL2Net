@@ -82,6 +82,7 @@ def guid():
     logging.debug("Generated unique ID: {}.".format(uid))
     return uid
 
+
 def guid_generator():
     while True:
         yield guid()
@@ -97,6 +98,7 @@ def mss_leaf_name(mss):
 
 
 def coalesce(value, default=None):
+    # TODO, if default value takes long to calculate --> ....
     return value if value is not None else default
 
 
@@ -160,10 +162,13 @@ def enewick(string):
 
 def enewick_helper(string, adjacency_dict, leaf_names):
     if len(string) == 1:
-        leaf_names.add(string[0])
+        leaf_name = string[0]
+        if '#' not in leaf_name:
+            leaf_names.add(leaf_name)
         return
 
     root = string[-1]
+    root_name = string[-1] if '#' not in string[-1] else string[-1][: string[-1].index('#')]
     string = string[1:-2]
 
     left_bracket_count = (string == '(').astype(int)
@@ -177,17 +182,20 @@ def enewick_helper(string, adjacency_dict, leaf_names):
         middle = middle.pop()
         left_side = string[:middle - 1]
         right_side = string[middle + 1:]
+        left_side_name = left_side[-1] if '#' not in left_side[-1] else left_side[-1][: left_side[-1].index('#')]
+        right_side_name = right_side[-1] if '#' not in right_side[-1] else right_side[-1][: right_side[-1].index('#')]
         try:
-            adjacency_dict[root].extend([left_side[-1], right_side[-1]])
+            adjacency_dict[root_name].extend([left_side_name, right_side_name])
         except KeyError:
-            adjacency_dict[root] = [left_side[-1], right_side[-1]]
+            adjacency_dict[root_name] = [left_side_name, right_side_name]
         enewick_helper(left_side, adjacency_dict, leaf_names)
         enewick_helper(right_side, adjacency_dict, leaf_names)
     else:
+        string_name = string[-1] if '#' not in string[-1] else string[-1][: string[-1].index('#')]
         try:
-            adjacency_dict[root].extend([string[-1]])
+            adjacency_dict[root_name].appenmd(string_name)
         except KeyError:
-            adjacency_dict[root] = [string[-1]]
+            adjacency_dict[root_name] = [string_name]
         enewick_helper(string, adjacency_dict, leaf_names)
 
 
@@ -254,7 +262,7 @@ def original_node_numbers(node_numbers):
 
 def power_set(iterable):
     s = list(iterable)
-    return itertools.chain.from_iterable(itertools.combinations(s, r) for r in range(len(s)+1))
+    return itertools.chain.from_iterable(itertools.combinations(s, r) for r in range(len(s) + 1))
 
 
 def flatten_dictionary(d, parent_key='', sep=' '):
@@ -266,3 +274,10 @@ def flatten_dictionary(d, parent_key='', sep=' '):
         else:
             items.append((new_key, v))
     return dict(items)
+
+
+def chebyshev_interpolation_points(start, stop, n, round_method=None):
+    res = [0.5 * (start + stop) + 0.5 * (stop - start) * np.cos((2 * k + 1) / (2 * n) * np.pi) for k in range(n)]
+    if round_method:
+        res = [round_method(x) for x in res]
+    return sorted(res)

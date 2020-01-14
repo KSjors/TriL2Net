@@ -1,3 +1,5 @@
+DEFAULT = 0
+
 #   Leaf locator
 GREEDY = 0
 ILP = 1
@@ -14,8 +16,16 @@ DEFAULT_THRESHOLD = 0
 DEFAULT_ORDER = 0
 
 #    Minimal sink-set
-DEFAULT_SINK_SET = 0
+FIRST_SCC_THAT_IS_MSS = 0
+EXPAND_FIRST_SCC = 1
 
 #    Trinet Compute Method
-RECURSIVE = 0
-ITERATIVE = 1
+ITERATIVE = 0
+RECURSIVE = 1
+
+# All trinet list
+
+
+FALSE = 0
+TRUE = 1
+

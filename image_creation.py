@@ -24,6 +24,7 @@ logging.getLogger('network').addHandler(fh)
 
 from datastructures.rooted_level_k_network import RootedLevelKNetwork
 
-enewick = "(a, b)0"
-network = RootedLevelKNetwork.from_enewick(enewick, check_valid=False)
-network.visualize(internal_node_labels=True, edge_labels=False, rankdir='LR', format='pdf', file_path='generator0')
+if __name__ == "__main__":
+    enewick = "(a, b)0"
+    network = RootedLevelKNetwork.from_enewick(enewick, check_valid=False)
+    network.visualize(internal_node_labels=True, arc_labels=False, rankdir='LR', format='pdf', file_path='generator99')

@@ -1,6 +1,6 @@
 # source: https://www.researchgate.net/figure/Suggested-reticulate-evolution-events-that-could-explain-the-ETS-patterns-in_fig1_37256249
 
-from datastructures.rooted_level_k_network import RootedLevelKNetwork
+from datastructures.rooted_level_k_network import RootedLevelKNetwork, NetworkSet
 
 ETS_NETWORK_dict = {
     0 : [1, 2],
@@ -34,18 +34,21 @@ ETS_NETWORK_dict = {
 }
 
 
+# ETS_NETWORK = RootedLevelKNetwork.from_connections_dict(ETS_NETWORK_dict)
+# ETS_NETWORK.terminate_leaves(
+#     leaf_names_to_keep={
+#         'H. angustifolius', 'H. floridanus', 'H. simulans'
+#         , 'H. anomalus', 'H. pumilus', 'H. cusikii', 'H. gracilentus'
+#         , 'H. praecox', 'H. debilis', 'H. niveus', 'H. petioaris'
+#         , 'H. deserticola', 'H. paradoxis', 'H. annuus', 'H. bolanderi'
+#         ,'H. argophyllus'})
+#
+# T1 = RootedLevelKNetwork.restrict(ETS_NETWORK, ['H. floridanus', 'H. simulans', 'H. niveus'])
+# T2 = RootedLevelKNetwork.restrict(ETS_NETWORK, ['H. anomalus', 'H. argophyllus', 'H. deserticola'])
+# T3 = RootedLevelKNetwork.restrict(ETS_NETWORK, ['H. angustifolius', 'H. praecox', 'H. deserticola'])
+#
+# T1.visualize(internal_node_labels=False, rankdir='LR', file_path='ETS_NETWORK_T1', format='pdf')
+# T2.visualize(internal_node_labels=False, rankdir='LR', file_path='ETS_NETWORK_T2', format='pdf')
+# T3.visualize(internal_node_labels=False, rankdir='LR', file_path='ETS_NETWORK_T3', format='pdf')
+#
 
-
-# ETS_NETWORK.visualize(internal_node_labels=False, rankdir='LR')
-#     for leaf in {'H. cusikii', 'H. praecox', 'H. petioaris', 'H. eggertii', 'H. laevigatus', 'H. schweinitzii', 'H. hirsutus', 'H. simulans', 'H. floridanus'}:
-#         ETS_NETWORK.terminate_leaf(leaf)
-#     ETS_NETWORK.rename_node('H. angustifolius', 'G1')
-#     ETS_NETWORK.rename_node('H. californicus', 'G2')
-#     ETS_NETWORK.rename_node('H. gracilentus', 'G3')
-#     ETS_NETWORK.rename_node('H. debilis', 'G4')
-#     ETS_NETWORK.rename_node('H. deserticola', 'G5')
-#     ETS_NETWORK = RootedLevelKNetwork.from_network(ETS_NETWORK, node_names=['G1', 'G3', 'G4', 'H. anomalus'])
-#     ETS_NETWORK.rename_node('G1', 'G6')
-#     ETS_NETWORK.rename_node('G3', 'G7')
-#     ETS_NETWORK.rename_node('G4', 'G8')
-#     ETS_NETWORK.visualize(file_path='ETS_NETWORK_P2_shrunken', internal_node_labels=False, rankdir='LR')

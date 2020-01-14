@@ -18,7 +18,7 @@ class Solver:
                  , standard_trinet_info_list: NetworkSet
                  , trinet_set: NetworkSet
                  , cut_arc_set_count_method: int = settings.MAXIMUM_MULTIPLICITY
-                 , minimal_sink_set_method: int = settings.FIRST_SCC_THAT_IS_MSS
+                 , minimal_sink_set_method: int = settings.EXPAND_FIRST_SCC
                  , leaf_locator_method: int = settings.GREEDY
                  , level_threshold_method: int = settings.DEFAULT_THRESHOLD
                  , level_count_method: int = settings.WEIGHTED_AVERAGE

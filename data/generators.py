@@ -43,6 +43,7 @@ D_necessary = [['1', '3']]
 generator_D = RootedLevelKGenerator(name='2d', dir_adj_matrix=D, symmetrical_nodes=D_symmetries, level=2)
 
 GENERATOR_DICT = {'0': generator_level0, '1': generator_level1, '2a': generator_A, '2b': generator_B, '2c': generator_C, '2d': generator_D}
+GENERATOR_LEVEL_LIST = {1: [GENERATOR_DICT['1']], 2: [GENERATOR_DICT['2a'], GENERATOR_DICT['2b'], GENERATOR_DICT['2c'], GENERATOR_DICT['2d']]}
 GENERATOR_NAMES_PER_LEVEL = {0: {'0'}, 1: {'1'}, 2: {'2a', '2b', '2c', '2d'}}
 RETICULATION_LEAF_SIDES_PER_GENERATOR = {'0': set(), '1': {'A'}, '2a': {'A'}, '2b': {'A', 'B'}, '2c': {'A', 'B'}, '2d': {'A'}}
 

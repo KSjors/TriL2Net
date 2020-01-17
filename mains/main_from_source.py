@@ -56,7 +56,7 @@ if __name__ == '__main__':
     }
 
     # Get input
-    TS_input = NetworkSet.from_text_trinet_format(text_file)
+    TS_input = NetworkSet.from_named_trinet_format(text_file)
     # print(TS_input.summary())
     # TP_input = NetworkSet.induced_tree_set_of_network_set(TS_input, progress_bar=True,  max_processes=1)
 

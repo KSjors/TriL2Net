@@ -125,7 +125,10 @@ def determine_ranking(score_matrix, ranking=None):
     return determine_ranking(score_matrix, ranking)
 
 
-def enewick(string):
+def enewick(string: str):
+    string = string.replace(',', ', ')
+    string = string.replace(',  ', ', ')
+
     result = []
     while len(string) > 0:
         try:
@@ -156,7 +159,17 @@ def enewick(string):
 
     adjacency_dict = dict()
     leaf_names = set()
-    enewick_helper(np.array(result), adjacency_dict, leaf_names)
+    # Add internal node numbers if missing
+    new_result = []
+    next_internal_number = 1
+    for index in range(len(result) - 1):
+        value, next_value = result[index], result[index + 1]
+        new_result.append(value)
+        if value == ')' and (next_value == ')' or next_value == ','):
+            new_result.append(str(next_internal_number))
+            next_internal_number += 1
+    new_result.append(result[-1])
+    enewick_helper(np.array(new_result), adjacency_dict, leaf_names)
     return adjacency_dict, leaf_names
 
 
@@ -167,8 +180,7 @@ def enewick_helper(string, adjacency_dict, leaf_names):
             leaf_names.add(leaf_name)
         return
 
-    root = string[-1]
-    root_name = string[-1] if '#' not in string[-1] else string[-1][: string[-1].index('#')]
+    root_name = string[-1]
     string = string[1:-2]
 
     left_bracket_count = (string == '(').astype(int)
@@ -182,8 +194,8 @@ def enewick_helper(string, adjacency_dict, leaf_names):
         middle = middle.pop()
         left_side = string[:middle - 1]
         right_side = string[middle + 1:]
-        left_side_name = left_side[-1] if '#' not in left_side[-1] else left_side[-1][: left_side[-1].index('#')]
-        right_side_name = right_side[-1] if '#' not in right_side[-1] else right_side[-1][: right_side[-1].index('#')]
+        left_side_name = left_side[-1]
+        right_side_name = right_side[-1]
         try:
             adjacency_dict[root_name].extend([left_side_name, right_side_name])
         except KeyError:
@@ -191,9 +203,9 @@ def enewick_helper(string, adjacency_dict, leaf_names):
         enewick_helper(left_side, adjacency_dict, leaf_names)
         enewick_helper(right_side, adjacency_dict, leaf_names)
     else:
-        string_name = string[-1] if '#' not in string[-1] else string[-1][: string[-1].index('#')]
+        string_name = string[-1]
         try:
-            adjacency_dict[root_name].appenmd(string_name)
+            adjacency_dict[root_name].append(string_name)
         except KeyError:
             adjacency_dict[root_name] = [string_name]
         enewick_helper(string, adjacency_dict, leaf_names)

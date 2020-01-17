@@ -66,8 +66,7 @@ def regenerate_standard_binets_trinets() -> None:
         network_info.network.calculate_optimization_variables()
     two_component_trinet_list.calculate_info()
 
-
-    pickle_out = open("data/all_networks_save.pickle", 'wb')
+    pickle_out = open("data/all_networks_save.pickle", 'wb+')
     data = [all_generators, biconnected_trinet_list, two_component_trinet_list]
     pickle.dump(data, pickle_out)
     pickle_out.close()
@@ -84,7 +83,6 @@ def get_standard_binets_trinets() -> (list, NetworkSet):
 
 
 LEVEL_1_2_GENERATORS, BICONNECTED_BINET_TRINET_LIST, TRINET_LIST = get_standard_binets_trinets()
-
 
 # for ti in TRINET_LIST.per_network_info():
 #     n = ti.network

@@ -2439,7 +2439,7 @@ class NetworkSet:
         return result
 
     @classmethod
-    def from_text_enewick(cls, file_path, network_size=3, sep=';'):
+    def from_enewick_format(cls, file_path, network_size=3, sep=';\n'):
         result = cls(network_size)
         with open(file_path, 'r') as f:
             data = f.read()
@@ -2454,7 +2454,7 @@ class NetworkSet:
         return result
 
     @classmethod
-    def from_text_trinet_format(cls, file_path, progress_bar=False):
+    def from_named_trinet_format(cls, file_path, progress_bar=False):
         result = cls(3)
         with open(file_path, 'r') as f:
             data = f.read()

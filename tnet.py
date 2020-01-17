@@ -50,5 +50,5 @@ if __name__ == '__main__':
     solver = Solver(TRINET_LIST, TS_input, **parameters)
     network, _, _ = solver.solve()
 
-    with open(f"{output_file}.txt", 'w') as f:
+    with open(f"{output_file}.eNewick", 'w') as f:
         f.write(network.enewick())

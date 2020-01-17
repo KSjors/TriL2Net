@@ -4,7 +4,7 @@
 Requisites:
 - The TriL2Net repository
 - Python 3.6+, including the packages: numpy, scipy, mip, inputimeout, multiprocessing, bidict, graphviz, tqdm, tarjan
-    (These can be installed using pip: pip install numpy scipy mip inputimeout multiprocessing bidict graphviz tqdm tarjan_
+    (These can be installed using pip: pip install numpy scipy mip inputimeout multiprocessing bidict graphviz tqdm tarjan)
 
 
 There are currently two ways to let TriL2Net compute a network from a set of trinets:

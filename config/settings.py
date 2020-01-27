@@ -29,3 +29,15 @@ RECURSIVE = 1
 FALSE = 0
 TRUE = 1
 
+# Formats
+FORMAT_eNewick = 0
+FORMAT_eNewick_multiplicity = 1
+FORMAT_tnets = 2
+# FORMAT_trilonet_input = 3
+
+FORMAT_extension = {
+    FORMAT_eNewick               : 'eNewick'
+    , FORMAT_eNewick_multiplicity: 'eNewickM'
+    , FORMAT_tnets               : 'tnets'
+    # , FORMAT_trilonet_input: 'tnets'
+}

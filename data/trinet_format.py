@@ -1,4 +1,4 @@
-TRINET_TYPE_ENEWICK = {
+LEVEL_1_TRINET_NAMES = {
     'T0': '(A, B)0'
     , 'T1': '((A, B)1, C)0'
     , 'S1': '((A, 3)1, (B, (C)3)2)0'

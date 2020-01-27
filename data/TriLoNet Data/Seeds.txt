@@ -1,0 +1,20 @@
+
+Seeds
+
+((15E,(17E,((30E,31E))#H1)),(16E,(18E,#H1)));
+((16E,(18E,(20E,(22E,(24E,(26E,#H0)12i)10i)8i)6i)4i)2i,(((((((((31E,32E)28i,(29E,30E)27i)14i)#H0,25E)11i,23E)9i,21E)7i,19E)5i,17E)3i,15E)1i);     
+((((((((12E,(13E)#H8),(14E,#H8)),15E),16E),17E),18E),19E),20E);
+((((((((a,(i)#H1),b),c),(d,#H1)),e),f),g),h);
+((((((((a,(i)#H1),b),c),d),e),f),g),(h,#H1));
+((((a,(i)#H1),(b,#H1)),(c,d)),((e,f),(g,h)));
+((((a,(i)#H1),b),(c,(d,#H1))),((e,f),(g,h)));
+((((a,(i)#H1),b),(c,d)),((e,f),(g,(h,#H1))));
+(((c,((f,g))#H1),(h,#H1)),((e,((a,b))#H2),(d,#H2)));
+((x,y),z);
+
+
+((15E,(17E,(((25E,(27E,((20E,21E))#H2)),(26E,(28E,#H2))))#H1)),(16E,(18E,#H1)));
+//This replaced the 2nd seed in experiments on 15 leaves as Lev1generator could not generate networks on 15 leaves using the 2nd seed above.
+
+
+The first seed is used as the seed in the experiments with only 1 seed, it is the default seed given by Lev1generator.

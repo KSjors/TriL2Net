@@ -25,7 +25,7 @@ import collections
 import multiprocessing
 import typing
 from config import settings
-from data.trinet_format import TRINET_TYPE_ENEWICK
+from data.trinet_format import LEVEL_1_TRINET_NAMES
 import operator
 
 pp = pprint.PrettyPrinter(indent=4)
@@ -139,7 +139,7 @@ class RootedLevelKNetwork:
         x = x[:-5]
         taxa = x.split(', ')
 
-        enewick = TRINET_TYPE_ENEWICK[trinet_type]
+        enewick = LEVEL_1_TRINET_NAMES[trinet_type]
         result = cls.from_enewick(enewick)
         for old_name, new_name in zip('ABC'[:len(taxa)], taxa):
             result.rename_node(old_name, new_name)
@@ -232,7 +232,7 @@ class RootedLevelKNetwork:
         return new_network
 
     @classmethod
-    def random(cls, number_of_leaves: int, recombination_chance: int, level: int):
+    def random(cls, number_of_leaves: int, recombination_chance: float, level: int):
         enewick_string = '(a, b)0'
         network = cls.from_enewick(enewick_string)
         network.level = level
@@ -432,7 +432,7 @@ class RootedLevelKNetwork:
     @property
     def _reticulationless_leaf_order(self) -> tuple:
         reticulation_leaves = self._reticulation_leaves
-        return tuple((leaf for leaf in leaf_ordering if not leaf in reticulation_leaves)for leaf_ordering in self._leaf_order)
+        return tuple((leaf for leaf in leaf_ordering if not leaf in reticulation_leaves) for leaf_ordering in self._leaf_order)
 
     @property
     def number_of_arcs(self):
@@ -1547,13 +1547,23 @@ class RootedLevelKNetwork:
                     return True
         return False
 
+    def level_1_trinet_name(self, level_1_trinets=None, leaf_name_sep=' '):
+        if level_1_trinets is None:
+            level_1_trinets = {name: RootedLevelKNetwork.from_enewick(eNewick_string) for name, eNewick_string in LEVEL_1_TRINET_NAMES.items()}
+        for name, level_1_trinet in level_1_trinets.items():
+            equal, _, leaf_translation_dicts = level_1_trinet.equal_structure(self)
+            if equal:
+                leaf_translation_dict = leaf_translation_dicts[0]
+                return name, f"{leaf_translation_dict['A']}{leaf_name_sep}{leaf_translation_dict['B']}{leaf_name_sep}{leaf_translation_dict['C']}"
+        return None, None
+
     def cut_arc_set_consistency(self, other):
         cut_arc_sets = {tuple(sorted(ca_set)) for ca_set in self.cut_arc_sets}
         other_cut_arc_sets = {tuple(sorted(ca_set)) for ca_set in other.cut_arc_sets}
         return sum([cut_arc_set in other_cut_arc_sets for cut_arc_set in cut_arc_sets]) / len(cut_arc_sets)
 
     # ------------------- EVOLVE METHODS ------------------ #
-    def evolve_times(self, times: int, recombination_chance: int = 0, progress_bar=False):
+    def evolve_times(self, times: int, recombination_chance: float = 0, progress_bar=False):
         if progress_bar:
             for _ in tqdm(range(times), desc="Evolving network"):
                 self.evolve(recombination_chance)
@@ -1583,7 +1593,7 @@ class RootedLevelKNetwork:
 
         self.prune()
 
-    def evolve(self, recombination_chance: int = 0) -> (bool, str):
+    def evolve(self, recombination_chance: float = 0) -> (bool, str):
         # Note: does not keep level intact perfectly
         assert 0 <= recombination_chance < 1, "Recombincation chance not between 0 and 1"
         if np.random.uniform() < recombination_chance:
@@ -1602,8 +1612,8 @@ class RootedLevelKNetwork:
         self.standardize_node_names()
 
     def enewick(self):
-        reticulation_name_map = {reticulation_name: f'{reticulation_name}#H{index}' for index, reticulation_name in enumerate(self.reticulations)}
-        return self._enewick(self._root, reticulation_name_map=reticulation_name_map)
+        reticulation_name_map = {reticulation_name: f'#H{index}' for index, reticulation_name in enumerate(self.reticulations)}
+        return self._enewick(self._root, reticulation_name_map=reticulation_name_map) + 'root;'
 
     def _enewick(self, current_node, traversed_nodes=None, reticulation_name_map=None):
         traversed_nodes = coalesce(traversed_nodes, [])
@@ -1612,8 +1622,10 @@ class RootedLevelKNetwork:
         node_name = self.get_node_name_of(current_node)
         if reticulation_name_map and node_name in reticulation_name_map:
             node_name_tag = reticulation_name_map[node_name]
-        else:
+        elif node_name in self.leaf_names:
             node_name_tag = node_name
+        else:
+            node_name_tag = ''
 
         # Stop if traversed
         if current_node in traversed_nodes:
@@ -1632,7 +1644,8 @@ class RootedLevelKNetwork:
         elif len(current_node_children) == 2:
             child_1 = current_node_children.pop()
             child_2 = current_node_children.pop()
-            return "(" + self._enewick(child_1, traversed_nodes, reticulation_name_map=reticulation_name_map) + ", " + self._enewick(child_2, traversed_nodes, reticulation_name_map=reticulation_name_map) + ")" + node_name_tag
+            return "(" + self._enewick(child_1, traversed_nodes, reticulation_name_map=reticulation_name_map) + "," + self._enewick(child_2, traversed_nodes,
+                                                                                                                                     reticulation_name_map=reticulation_name_map) + ")" + node_name_tag
         raise ValueError
 
     def __str__(self):
@@ -2015,12 +2028,14 @@ class NetworkSet:
         result = cls()
         if progress_bar:
             for network_info in tqdm(network_set.per_network_info()):
-                induced_trees = cls.induced_strict_tree_set(network_info.network, network_size=network_info.network.number_of_leaves, max_processes=max_processes,
+                induced_trees = cls.induced_strict_tree_set(network_info.network, network_size=network_info.network.number_of_leaves,
+                                                            max_processes=max_processes,
                                                             multiplicity=network_info.multiplicity)
                 result.extend(induced_trees)
         else:
             for network_info in network_set.per_network_info():
-                induced_trees = cls.induced_strict_tree_set(network_info.network, network_size=network_info.network.number_of_leaves, max_processes=max_processes,
+                induced_trees = cls.induced_strict_tree_set(network_info.network, network_size=network_info.network.number_of_leaves,
+                                                            max_processes=max_processes,
                                                             multiplicity=network_info.multiplicity)
                 result.extend(induced_trees)
         return result
@@ -2474,7 +2489,7 @@ class NetworkSet:
         return result
 
     def summary(self, depth=None):
-        depth = coalesce(depth, [0,1])
+        depth = coalesce(depth, [0, 1])
         # Compute properties of this network set
         if 0 in depth:
             summary_0 = self._analyse_networks()
@@ -2781,6 +2796,34 @@ class NetworkSet:
 
     def to_enewick(self):
         return {network_info.network.enewick(): network_info.multiplicity for network_info in self.per_network_info()}
+
+    def save_to_file(self, file_path, frmt=settings.FORMAT_eNewick_multiplicity):
+        if frmt == settings.FORMAT_eNewick_multiplicity:
+            data = self.to_enewick()
+            text_data = '\n'.join([f"{enewick} {multiplicity}" for enewick, multiplicity in data.items()])
+        elif frmt == settings.FORMAT_eNewick:
+            data = self.to_enewick()
+            text_data = '\n'.join([f"{enewick}" for enewick, _ in data.items()])
+        # elif frmt == settings.FORMAT_tnet:
+        #     data = []
+        #     for i, network_info in enumerate(self.per_network_info()):
+        #         level_1_trinet_name, leaf_names = network_info.network.level_1_trinet_name(leaf_name_sep=', ')
+        #         if level_1_trinet_name is None:
+        #             raise ValueError("Trinet is not level-1")
+        #         data.append(f"Tr{i} = Tr{{{leaf_names} : {level_1_trinet_name}}}")
+        #     text_data = '\n'.join(data)
+        elif frmt == settings.FORMAT_tnets:
+            data = []
+            for network_info in self.per_network_info():
+                level_1_trinet_name, leaf_names = network_info.network.level_1_trinet_name(leaf_name_sep=' ')
+                if level_1_trinet_name is None:
+                    raise ValueError("Trinet is not level-1")
+                data.append(f"{leaf_names} {level_1_trinet_name}")
+            text_data = '\n'.join(data)
+        else:
+            raise ValueError('Format not defined')
+        with open(f'{file_path}.{settings.FORMAT_extension[frmt]}', 'w+') as f:
+            f.write(text_data)
 
     def per_network_info(self):
         for _, dictionary in self:

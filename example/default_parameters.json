@@ -1,0 +1,12 @@
+{
+	"cut_arc_set_count_method"          : 0
+        , "minimal_sink_set_method"         : 1
+        , "leaf_locator_method"             : 0
+        , "level_threshold_method"          : 0
+        , "level_count_method"              : 1
+        , "generator_count_method"          : 1
+        , "symmetric_sides_set_count_method": 1
+        , "leaf_order_count_method"         : 1
+        , "leaf_order_method"               : 0
+        , "fill_gaps"                       : 0
+}

@@ -128,6 +128,8 @@ def determine_ranking(score_matrix, ranking=None):
 def enewick(string: str):
     string = string.replace(',', ', ')
     string = string.replace(',  ', ', ')
+    if string[-1] == ';':
+        string = string[:-1]
 
     result = []
     while len(string) > 0:

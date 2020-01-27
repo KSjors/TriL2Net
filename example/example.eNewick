@@ -1,0 +1,4 @@
+(a,(b,c))root;
+(a,(b,d))root;
+(a,(c,d))root;
+((b,(d)#H1),(c,#H1))root;

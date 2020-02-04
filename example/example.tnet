@@ -1,4 +1,4 @@
-Tr0 = Tr{b, c, a: T1}
-Tr1 = Tr{c, d, a: T1}
-Tr2 = Tr{d, b, a: T1}
-Tr3 = Tr{b, c, d: S1}
+Tr0 = Tr{b, c, a : T1}
+Tr1 = Tr{c, d, a : T1}
+Tr2 = Tr{d, b, a : T1}
+Tr3 = Tr{b, c, d : S1}
